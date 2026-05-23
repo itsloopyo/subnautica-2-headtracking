@@ -1,0 +1,80 @@
+name: Build
+
+on:
+  push:
+    branches: ['**']
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+
+jobs:
+  build:
+    if: ${{ !startsWith(github.event.head_commit.message, 'Release v') }}
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Configure CMake
+        run: cmake -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build Release
+        run: cmake --build build --config Release
+
+      - name: Verify build outputs
+        shell: pwsh
+        run: |
+          $asi = "build/Release/Subnautica2HeadTracking.asi"
+          if (-not (Test-Path $asi)) {
+            Write-Host "::error::Missing build artifact: $asi"
+            exit 1
+          }
+          Write-Host "Build outputs:"
+          Get-ChildItem build/Release | Format-Table Name, Length
+
+      - name: Package installer
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File scripts/package-release.ps1
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::Packaging failed"
+            exit 1
+          }
+
+      - name: Stage installer contents for artifact upload
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem release/*-installer.zip | Select-Object -First 1
+          if (-not $installer) {
+            Write-Host "::error::No installer ZIP found in release/"
+            exit 1
+          }
+          $dest = "release/artifact-contents"
+          if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+          New-Item -ItemType Directory -Path $dest | Out-Null
+          Expand-Archive -Path $installer.FullName -DestinationPath $dest -Force
+
+      - name: Compute artifact name from ref
+        shell: pwsh
+        run: |
+          $branch = if ($env:GITHUB_HEAD_REF) { $env:GITHUB_HEAD_REF } else { $env:GITHUB_REF_NAME }
+          $sanitized = $branch -replace '[^A-Za-z0-9._-]', '-'
+          "ARTIFACT_NAME=Subnautica2HeadTracking-$sanitized" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: release/artifact-contents/
+          retention-days: 14
+          if-no-files-found: error

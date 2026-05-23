@@ -1,0 +1,116 @@
+name: SN2 patch watch
+
+# Polls Steam daily for a change in Subnautica 2's public branch buildid.
+# When the buildid moves, opens an issue with a rederive checklist and
+# commits the new buildid to .github/sn2-last-known-build.txt so the next
+# run only fires on a further change. This is the "heads up so I can prep
+# a new release" channel; the in-game ValidateRunningBuild remains the
+# hard backstop that prevents stale RVAs from crashing users' sessions.
+
+on:
+  schedule:
+    - cron: '0 9 * * *'   # daily 09:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: sn2-patch-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Query SN2 public buildid via SteamCMD
+        id: query
+        run: |
+          set -euo pipefail
+          docker pull steamcmd/steamcmd:ubuntu-22 >/dev/null
+          OUT=$(docker run --rm steamcmd/steamcmd:ubuntu-22 \
+            +login anonymous \
+            +app_info_update 1 \
+            +app_info_print 1962700 \
+            +quit)
+          # app_info_print emits VDF. Find the "public" branch and grab
+          # its buildid. Layout:
+          #   "branches" { "public" { "buildid" "12345678" ... } ... }
+          NEW_BUILD=$(echo "$OUT" | awk '
+            $1 == "\"public\"" { found=1; next }
+            found && $1 == "\"buildid\"" {
+              gsub(/"/, "", $2); print $2; exit
+            }
+          ')
+          if [[ -z "${NEW_BUILD:-}" ]]; then
+            echo "::error::Could not parse public buildid from SteamCMD output."
+            echo "--- last 100 lines of SteamCMD output ---"
+            echo "$OUT" | tail -100
+            exit 1
+          fi
+          echo "Detected SN2 public buildid: $NEW_BUILD"
+          echo "new=$NEW_BUILD" >> "$GITHUB_OUTPUT"
+
+      - name: Compare against last-known buildid
+        id: compare
+        run: |
+          set -euo pipefail
+          FILE=".github/sn2-last-known-build.txt"
+          NEW="${{ steps.query.outputs.new }}"
+          if [[ -f "$FILE" ]]; then
+            OLD=$(tr -d '[:space:]' < "$FILE")
+          else
+            OLD=""
+          fi
+          echo "old=$OLD" >> "$GITHUB_OUTPUT"
+          if [[ "$NEW" == "$OLD" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No change. buildid is still $NEW."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Change detected: '$OLD' -> '$NEW'."
+          fi
+
+      - name: Open issue + record new buildid
+        if: steps.compare.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          NEW="${{ steps.query.outputs.new }}"
+          OLD="${{ steps.compare.outputs.old }}"
+          OLD_DISPLAY=${OLD:-"(none recorded yet)"}
+
+          mkdir -p .github
+          echo "$NEW" > .github/sn2-last-known-build.txt
+
+          gh issue create \
+            --title "SN2 patch detected: public buildid $OLD_DISPLAY -> $NEW" \
+            --body "$(cat <<EOF
+          Steam reports a new public build for [Subnautica 2](https://store.steampowered.com/app/1962700/Subnautica_2/) (app \`1962700\`).
+
+          - Previous buildid: \`$OLD_DISPLAY\`
+          - New buildid:      \`$NEW\`
+
+          ## Rederive checklist
+
+          1. Update SN2 via Steam, then quit it cleanly.
+          2. Run \`pixi run check-fingerprint\` against the updated \`Subnautica2-Win64-Shipping.exe\` to see whether the EXE actually changed (not just an asset-only patch). If the fingerprint already matches \`ghidra_offsets.h\`, close this issue - no rederivation needed.
+          3. If fingerprint differs: re-import the EXE in Ghidra and run \`pixi run ghidra-script dump_pe_fingerprint\` + \`pixi run ghidra-script rederive_all\` (see \`.lab/NOTES.md\` for the full flow).
+          4. Update \`src/Subnautica2HeadTracking/ghidra_offsets.h\` with the new constants.
+          5. Smoke-test in-game, bump version, ship via \`pixi run release\`.
+          6. Close this issue once the release is out.
+
+          ---
+          Auto-opened by \`.github/workflows/sn2-patch-watch.yml\`.
+          EOF
+          )"
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/sn2-last-known-build.txt
+          git commit -m "SN2 patch watch: record buildid $NEW [skip ci]"
+          git push

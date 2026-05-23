@@ -1,0 +1,44 @@
+[workspace]
+name = "subnautica-2-head-tracking"
+version = "0.0.0"
+description = "Head tracking mod for Subnautica 2 (UE5, Xbox/WinGDK) using CameraUnlock shared library"
+channels = ["conda-forge"]
+platforms = ["win-64"]
+
+[tasks]
+sync = "git submodule update --remote cameraunlock-core"
+
+# Configure CMake (x64, MSVC, UE5/WinGDK target)
+setup = { cmd = """
+    powershell -Command "if (-not (Test-Path 'build')) { cmake -B build -G 'Visual Studio 17 2022' -A x64 } else { Write-Host 'Build directory exists, skipping setup' -ForegroundColor Yellow }"
+""" }
+
+build = { cmd = "cmake --build build --config Release", depends-on = ["setup"] }
+build-debug = { cmd = "cmake --build build --config Debug", depends-on = ["setup"] }
+
+install = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/deploy.ps1 Release", depends-on = ["build"] }
+uninstall = "scripts\\uninstall.cmd"
+
+package = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/package-release.ps1", depends-on = ["build"] }
+
+clean = { cmd = """
+    powershell -Command "if (Test-Path 'build') { Remove-Item 'build' -Recurse -Force }; Write-Host 'Build artifacts cleaned' -ForegroundColor Green"
+""" }
+
+# Bump vendored mod-loader copies to latest upstream within pinned range.
+# Manual; commit the result. CI does not run this.
+update-deps = "powershell -ExecutionPolicy Bypass -File scripts/update-deps.ps1"
+
+# Full release workflow - creates tag and pushes to trigger CI release
+release = "powershell -ExecutionPolicy Bypass -File scripts/release.ps1"
+
+# Run a Ghidra headless script from scripts/ghidra/ against the game EXE.
+# First invocation auto-imports + analyses the binary into C:\temp\subnautica-2.
+# Usage: pixi run ghidra-script <script-name>
+ghidra-script = "powershell -ExecutionPolicy Bypass -File scripts/ghidra-headless.ps1"
+
+# Compare the installed SN2 EXE's PE fingerprint (TimeDateStamp / SizeOfImage
+# / CheckSum) against the values committed in ghidra_offsets.h. Useful after
+# a Steam patch to find out whether RVAs need rederiving before cutting a
+# new release. Pass the EXE path positionally to override auto-detection.
+check-fingerprint = "powershell -ExecutionPolicy Bypass -File scripts/check-fingerprint.ps1"

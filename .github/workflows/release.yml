@@ -1,0 +1,93 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Extract version from tag
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          if ($tag -notmatch '^v(\d+\.\d+\.\d+)$') {
+            Write-Host "::error::Tag '$tag' is not in vX.Y.Z form"
+            exit 1
+          }
+          "MOD_VERSION=$($Matches[1])" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Validate version matches install.cmd
+        shell: pwsh
+        run: |
+          $line = Select-String -Path scripts/install.cmd -Pattern 'set "MOD_VERSION=([0-9]+\.[0-9]+\.[0-9]+)"' | Select-Object -First 1
+          if (-not $line) {
+            Write-Host "::error::Could not find MOD_VERSION in scripts/install.cmd"
+            exit 1
+          }
+          $fileVersion = $line.Matches[0].Groups[1].Value
+          if ($fileVersion -ne $env:MOD_VERSION) {
+            Write-Host "::error::Tag version $($env:MOD_VERSION) does not match install.cmd MOD_VERSION $fileVersion"
+            exit 1
+          }
+          Write-Host "Version $fileVersion matches tag"
+
+      - name: Configure CMake
+        run: cmake -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build Release
+        run: cmake --build build --config Release
+
+      - name: Package release artifacts
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File scripts/package-release.ps1
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::Packaging failed"
+            exit 1
+          }
+
+      - name: Generate release notes
+        shell: pwsh
+        run: |
+          & cameraunlock-core/scripts/generate-release-notes.ps1 `
+            -Version $env:MOD_VERSION `
+            -ProjectName "Subnautica 2 Head Tracking" `
+            -ArtifactPaths @('src/', 'cameraunlock-core/', 'scripts/install.cmd', 'scripts/uninstall.cmd') `
+            -OutputFile release-notes.txt
+
+      - name: Find release ZIPs
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem release/*-installer.zip | Select-Object -First 1
+          $nexus = Get-ChildItem release/*-nexus.zip | Select-Object -First 1
+          if (-not $installer) {
+            Write-Host "::error::No -installer.zip found in release/"
+            exit 1
+          }
+          if (-not $nexus) {
+            Write-Host "::error::No -nexus.zip found in release/"
+            exit 1
+          }
+          "INSTALLER_ZIP=$($installer.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "NEXUS_ZIP=$($nexus.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Create GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create $env:GITHUB_REF_NAME `
+            "$env:INSTALLER_ZIP" `
+            "$env:NEXUS_ZIP" `
+            --title "Subnautica 2 Head Tracking $env:GITHUB_REF_NAME" `
+            --notes-file release-notes.txt
