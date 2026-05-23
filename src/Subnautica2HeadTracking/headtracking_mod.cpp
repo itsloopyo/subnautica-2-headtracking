@@ -799,6 +799,53 @@ namespace Subnautica2HeadTracking
         // save-load from crashing in the script VM.
         struct ReticleWidget { std::uintptr_t Obj; std::uintptr_t Cls; };
 
+        // WBP_HoverTargetInfo is reused by SN2 for two unrelated roles - the
+        // world-hover interaction prompt (point at a PDA / fragment) AND
+        // equipped-item action prompts (eg air-bladder "Inhale / Ascend").
+        // Class-name match alone can't tell them apart. Discriminator: the
+        // world-hover variant sits at RenderTransform.Translation ~ (0, 0)
+        // and the engine never moves it; the button-bar variant is pinned
+        // by the engine at a non-zero translation (its slot anchors it off-
+        // centre on the action bar). We snapshot each instance's base
+        // translation ONCE the first time we see it - before DriveTooltipMove
+        // ever writes - and only move the near-origin ones.
+        struct TooltipWidget {
+            std::uintptr_t Obj;
+            std::uintptr_t Cls;
+            double         BaseTx;
+            double         BaseTy;
+            bool           FollowsReticle;
+            // Candidate per-frame discriminator children resolved
+            // by name from the widget's pointer-field region. SN2
+            // reuses one WBP_HoverTargetInfo for world-hover and
+            // equipped-item action prompts; we gate on whichever
+            // child's ESlateVisibility actually toggles. Empirical:
+            // TextBlock_ObectName is always Visible (its text just
+            // varies); the bladder prompts live in ToolbarTexts;
+            // the world-hover interaction lives in
+            // InteractionPromptContainer (Overlay). Current gate is
+            // InteractionPromptContainer's vis; the others are
+            // logged each call so we can re-pin if SN2 patches
+            // change the toggle.
+            std::uintptr_t Gate;          // gating widget
+            std::uintptr_t GateCls;
+            std::uintptr_t DiagObjectName;
+            std::uintptr_t DiagObjectNameCls;
+            std::uintptr_t DiagPrimary;
+            std::uintptr_t DiagPrimaryCls;
+            std::uintptr_t DiagSecondary;
+            std::uintptr_t DiagSecondaryCls;
+            std::uintptr_t DiagToolbarTexts;
+            std::uintptr_t DiagToolbarTextsCls;
+            // SN2HoverTargetViewModel - MVVM viewmodel that drives the
+            // world-hover prompt content. Hypothesis: holds a Target
+            // UObject* (or similar) that's null in button-bar mode
+            // and set when the player aims at a hoverable. Probe its
+            // memory each gate call until we see a field that toggles.
+            std::uintptr_t HoverVM;
+            std::uintptr_t HoverVMCls;
+        };
+
         std::mutex                  g_reticleMutex;
         std::vector<ReticleWidget>  g_reticleWidgets;
         std::atomic<std::uintptr_t> g_getOpacityFn{0};
@@ -807,26 +854,39 @@ namespace Subnautica2HeadTracking
         std::atomic<std::uintptr_t> g_setVisFn{0};
         std::atomic<bool>           g_reticleMoveOn{true};
 
-        // The interaction tooltip ("hover an interactable") is the UMG Overlay
-        // named "InteractionPromptContainer" (found via the keyword dump). The
-        // game anchors it to screen centre; we push the body-forward reticle
-        // offset into its RenderTransform.Translation each gameplay frame so the
-        // prompt sits where the body is actually aiming. Two live instances
-        // (archetype + painted), same pattern as the reticle - we move both; the
-        // unrendered one is harmless. setRenderTranslation takes an FVector2D of
-        // two floats in this build (see project_sn2_reticle_widget memory).
-        std::vector<ReticleWidget>  g_tooltipWidgets;
-        std::atomic<std::uintptr_t> g_setRenderTranslationFn{0};
-        std::atomic<bool>           g_tooltipMoveOn{true};
+        // Tooltip widgets: see TooltipWidget comment above for the
+        // world-hover vs button-bar discrimination. Snapshot map keyed by
+        // object pointer is persistent across CollectReticleWidgets passes
+        // so we never re-snapshot a contaminated value (after the first
+        // DriveTooltipMove write the base reading would be our own offset,
+        // not the engine's intent).
+        std::vector<TooltipWidget>                                          g_tooltipWidgets;
+        std::unordered_map<std::uintptr_t, std::pair<double, double>>       g_tooltipBaseSeen;
+        std::atomic<std::uintptr_t>                                         g_setRenderTranslationFn{0};
+        // On by default. DriveTooltipMove gates per-frame on the live
+        // ESlateVisibility of WBP_HoverTargetInfo's TextBlock_ObectName
+        // child: drawn -> world-hover context, follow the reticle;
+        // Collapsed/Hidden -> the widget is showing button-bar item
+        // prompts (eg air-bladder Inhale/Ascend), leave it screen-fixed.
+        // The single live instance is reused across both roles, so this
+        // is the real discriminator.
+        std::atomic<bool>                                                   g_tooltipMoveOn{true};
         // Backbuffer pixels -> UMG slate units. 1.0 holds at viewport DPI scale
         // 1.0; tune via [Tooltip] FollowScale if the prompt over/undershoots the
         // reticle at the user's resolution.
-        std::atomic<float>          g_tooltipFollowScale{1.0f};
+        std::atomic<float>                                                  g_tooltipFollowScale{1.0f};
+        // Slate units; widgets within this radius of (0, 0) at first sighting
+        // are treated as world-hover (follow the reticle). The bladder Inhale/
+        // Ascend prompt observed in-game sits well outside this radius.
+        constexpr double            kTooltipBaseEpsilon = 4.0;
 
         // Re-validate a collected widget on the game thread immediately before
         // calling into it: the held pointer must still carry the class it had
         // at collect time, else it was freed/reused (save load) and is unsafe.
-        bool ReticleWidgetLive(const ReticleWidget& w) {
+        // Templated so the same check works for ReticleWidget and TooltipWidget
+        // - both expose Obj/Cls; the extra TooltipWidget fields are ignored.
+        template <typename T>
+        bool ReticleWidgetLive(const T& w) {
             std::uintptr_t cls = 0;
             return SafeReadPtr(w.Obj + Offsets::UObjectGlobals::kClassPrivate, cls)
                 && cls == w.Cls;
@@ -843,7 +903,11 @@ namespace Subnautica2HeadTracking
                 "InteractionIcon", "Decor", "ArrowTexture", "ReticleOverlay",
             };
             std::vector<ReticleWidget> found;
-            std::vector<ReticleWidget> tips;
+            std::vector<TooltipWidget> tips;
+            // Captured raw-name strings keyed by Obj so the post-scan
+            // publish step can log first-sighting entries without re-
+            // calling ClassName/ObjectName (those iterate FNamePool).
+            std::vector<std::pair<std::string, std::string>> tipNames;
             ForEachUObject([&](std::uintptr_t obj) -> bool {
                 const std::string on = ObjectName(obj);
                 if (ContainsCI(on, "Default__")) return false;  // skip CDOs
@@ -859,8 +923,57 @@ namespace Subnautica2HeadTracking
                     const std::string cn = ClassName(obj);
                     if (ContainsCI(cn, "HoverTargetInfo")) {
                         std::uintptr_t cls = 0;
-                        if (SafeReadPtr(obj + Offsets::UObjectGlobals::kClassPrivate, cls) && cls)
-                            tips.push_back({obj, cls});
+                        if (SafeReadPtr(obj + Offsets::UObjectGlobals::kClassPrivate, cls) && cls) {
+                            // Tentatively snapshot the current render
+                            // translation. The publish step below
+                            // decides whether this is the first
+                            // sighting (use this value) or a re-scan
+                            // (use the remembered base instead, which
+                            // is the only one untainted by our own
+                            // writes). RenderTransform.Translation
+                            // layout is two doubles (UE5 LWC), see
+                            // DriveTooltipMove for the layout-pin
+                            // rationale.
+                            double tx = 0.0, ty = 0.0;
+                            std::uintptr_t qx = 0, qy = 0;
+                            if (SafeReadPtr(obj + 0x90, qx)) std::memcpy(&tx, &qx, 8);
+                            if (SafeReadPtr(obj + 0x98, qy)) std::memcpy(&ty, &qy, 8);
+                            // Walk pointer fields 0xc0..0x400 once and pick
+                            // up each named child we care about. Each goes
+                            // into a slot on the TooltipWidget so the per-
+                            // frame gate + diagnostic line don't have to re-
+                            // scan.
+                            std::uintptr_t pGate=0, pGateCls=0;
+                            std::uintptr_t pObjName=0, pObjNameCls=0;
+                            std::uintptr_t pPri=0, pPriCls=0;
+                            std::uintptr_t pSec=0, pSecCls=0;
+                            std::uintptr_t pTb=0, pTbCls=0;
+                            std::uintptr_t pVm=0, pVmCls=0;
+                            for (std::size_t coff = 0xc0; coff < 0x400; coff += 8) {
+                                std::uintptr_t cand = 0;
+                                if (!SafeReadPtr(obj + coff, cand) || !cand) continue;
+                                if ((cand & 0x7) != 0) continue;
+                                std::uintptr_t cls2 = 0;
+                                if (!SafeReadPtr(cand + Offsets::UObjectGlobals::kClassPrivate, cls2)
+                                    || !cls2) continue;
+                                const std::string nm = ObjectName(cand);
+                                if      (nm == "InteractionPromptContainer") { pGate=cand;    pGateCls=cls2; }
+                                else if (nm == "TextBlock_ObectName")        { pObjName=cand; pObjNameCls=cls2; }
+                                else if (nm == "Primary")                    { pPri=cand;     pPriCls=cls2; }
+                                else if (nm == "Secondary")                  { pSec=cand;     pSecCls=cls2; }
+                                else if (nm == "ToolbarTexts")               { pTb=cand;      pTbCls=cls2; }
+                                else if (nm == "HoverTargetViewModel")       { pVm=cand;      pVmCls=cls2; }
+                            }
+                            tips.push_back({obj, cls, tx, ty,
+                                /*FollowsReticle*/ false,
+                                pGate, pGateCls,
+                                pObjName, pObjNameCls,
+                                pPri, pPriCls,
+                                pSec, pSecCls,
+                                pTb, pTbCls,
+                                pVm, pVmCls});
+                            tipNames.emplace_back(cn, on);
+                        }
 #if SN2HT_DEV_HOTKEYS
                         // Discriminator hunt: button-bar tooltips (eg air bladder
                         // "Inhale / Ascend") share the HoverTargetInfo class with
@@ -907,6 +1020,110 @@ namespace Subnautica2HeadTracking
             {
                 std::lock_guard<std::mutex> lk(g_reticleMutex);
                 g_reticleWidgets = found;
+                // Reconcile tentative tip bases with the persistent map.
+                // Same-object repeat sightings keep the original (untainted)
+                // base; new objects get their freshly-read base recorded
+                // and a first-sighting log line so the discriminator
+                // decision is visible. FollowsReticle is computed from
+                // whichever base is canonical.
+                for (std::size_t i = 0; i < tips.size(); ++i) {
+                    auto it = g_tooltipBaseSeen.find(tips[i].Obj);
+                    if (it == g_tooltipBaseSeen.end()) {
+                        g_tooltipBaseSeen.emplace(tips[i].Obj,
+                            std::make_pair(tips[i].BaseTx, tips[i].BaseTy));
+                        tips[i].FollowsReticle =
+                            (std::abs(tips[i].BaseTx) + std::abs(tips[i].BaseTy))
+                                < kTooltipBaseEpsilon;
+                        const auto& nm = tipNames[i];
+                        Log::Line("tooltip-base 0x%llx class=%s name=%s base=(%.2f,%.2f) follows=%d",
+                            static_cast<unsigned long long>(tips[i].Obj),
+                            nm.first.c_str(),
+                            nm.second.c_str(),
+                            tips[i].BaseTx, tips[i].BaseTy,
+                            tips[i].FollowsReticle ? 1 : 0);
+
+                        // One-shot Slot probe: scan +0x28 .. +0x90 for the
+                        // first UObject-shaped pointer whose class name
+                        // contains "Slot" (UPanelSlot subclass). Then dump
+                        // the slot's first 80 bytes as pairs of floats and
+                        // as 8-byte words, so we can spot the FAnchorData
+                        // block (Offsets margin + Anchors min/max + Alignment)
+                        // and read Anchors.Y / Anchors.MaxY at runtime to
+                        // discriminate centered (world-hover, anchor ~0.5)
+                        // from bottom-anchored (bladder action prompt,
+                        // anchor ~1.0). UWidget::Slot offset and
+                        // UCanvasPanelSlot::LayoutData offset are unknown
+                        // in this build so we probe.
+                        std::uintptr_t slotPtr = 0;
+                        std::size_t    slotOff = 0;
+                        std::string    slotClass;
+                        for (std::size_t off = 0x28; off < 0xa0; off += 8) {
+                            std::uintptr_t cand = 0;
+                            if (!SafeReadPtr(tips[i].Obj + off, cand) || !cand) continue;
+                            if ((cand & 0x7) != 0) continue;
+                            const std::string ccn = ClassName(cand);
+                            if (ccn.empty()) continue;
+                            if (ccn.find("Slot") != std::string::npos) {
+                                slotPtr   = cand;
+                                slotOff   = off;
+                                slotClass = ccn;
+                                break;
+                            }
+                        }
+                        if (slotPtr) {
+                            Log::Line("  slot widget+0x%zx -> 0x%llx class=%s",
+                                slotOff, static_cast<unsigned long long>(slotPtr),
+                                slotClass.c_str());
+                            for (std::size_t soff = 0x20; soff < 0x80; soff += 8) {
+                                std::uintptr_t v8 = 0;
+                                std::uint32_t b32a = 0, b32b = 0;
+                                float f0 = 0.0f, f1 = 0.0f;
+                                if (!SafeReadPtr(slotPtr + soff, v8)) v8 = 0;
+                                if (SafeReadU32(slotPtr + soff,     b32a)) std::memcpy(&f0, &b32a, 4);
+                                if (SafeReadU32(slotPtr + soff + 4, b32b)) std::memcpy(&f1, &b32b, 4);
+                                Log::Line("    slot+0x%02zx p=0x%016llx f=(%.4f,%.4f)",
+                                    soff, static_cast<unsigned long long>(v8), f0, f1);
+                            }
+                        } else {
+                            Log::Line("  slot not found in widget+0x28..0xa0");
+                        }
+
+                        // One-shot dump of every 8-byte aligned pointer field
+                        // in the widget instance from +0xc0 (just past stock
+                        // UWidget UPROPERTY header inc RenderTransform) up to
+                        // +0x400 that resolves to a live UObject. UMG widget
+                        // Blueprints expose each named child widget (Text
+                        // blocks, panels, images) as a UPROPERTY pointer on
+                        // the instance - those land in this range and their
+                        // class/name tells us the visible content layout.
+                        // The bladder-vs-world-hover discriminator should be
+                        // one of these children: it'll be visible only in one
+                        // mode. Capture once per instance; the structure is
+                        // static after construction.
+                        Log::Line("  child-pointers in widget 0x%llx:",
+                            static_cast<unsigned long long>(tips[i].Obj));
+                        for (std::size_t coff = 0xc0; coff < 0x400; coff += 8) {
+                            std::uintptr_t cand = 0;
+                            if (!SafeReadPtr(tips[i].Obj + coff, cand) || !cand) continue;
+                            if ((cand & 0x7) != 0) continue;
+                            std::uintptr_t cls2 = 0;
+                            if (!SafeReadPtr(cand + Offsets::UObjectGlobals::kClassPrivate, cls2)
+                                || !cls2) continue;
+                            const std::string ccn = ClassName(cand);
+                            if (ccn.empty()) continue;
+                            const std::string cnm = ObjectName(cand);
+                            Log::Line("    widget+0x%03zx -> 0x%llx class=%s name=%s",
+                                coff, static_cast<unsigned long long>(cand),
+                                ccn.c_str(), cnm.c_str());
+                        }
+                    } else {
+                        tips[i].BaseTx = it->second.first;
+                        tips[i].BaseTy = it->second.second;
+                        tips[i].FollowsReticle =
+                            (std::abs(tips[i].BaseTx) + std::abs(tips[i].BaseTy))
+                                < kTooltipBaseEpsilon;
+                    }
+                }
                 g_tooltipWidgets = tips;
             }
             // These are engine UFunction objects (UWidget methods); they are
@@ -1160,14 +1377,14 @@ namespace Subnautica2HeadTracking
             if (!g_tooltipMoveOn.load(std::memory_order_relaxed)) return;
             const std::uintptr_t setTr = g_setRenderTranslationFn.load();
             if (!setTr) return;
-            std::vector<ReticleWidget> widgets;
+            std::vector<TooltipWidget> widgets;
             {
                 std::lock_guard<std::mutex> lk(g_reticleMutex);
                 widgets = g_tooltipWidgets;
             }
             if (widgets.empty()) return;
             if (!g_processEvent) {
-                for (const ReticleWidget& w : widgets) {
+                for (const TooltipWidget& w : widgets) {
                     if (ReticleWidgetLive(w)) { ResolveProcessEvent(w.Obj); break; }
                 }
                 if (!g_processEvent) return;
@@ -1202,10 +1419,95 @@ namespace Subnautica2HeadTracking
                 Log::Line("tooltip-move: haveOffset=%d raw=(%.1f,%.1f) off=(%.1f,%.1f) widgets=%zu scale=%.2f",
                     haveOffset ? 1 : 0, rawX, rawY, dx, dy, widgets.size(),
                     g_tooltipFollowScale.load());
-            for (const ReticleWidget& w : widgets) {
+            const std::uintptr_t getVis = g_getVisFn.load();
+            auto readVis = [&](std::uintptr_t child, std::uintptr_t childCls) -> std::uint8_t {
+                if (!child || !getVis) return 0xff;
+                std::uintptr_t live = 0;
+                if (!SafeReadPtr(child + Offsets::UObjectGlobals::kClassPrivate, live)
+                    || live != childCls) return 0xff;
+                std::uint8_t v = 0xff;
+                SafeProcessEvent(reinterpret_cast<void*>(child),
+                                 reinterpret_cast<void*>(getVis), &v);
+                return v;
+            };
+            for (const TooltipWidget& w : widgets) {
                 if (!ReticleWidgetLive(w)) continue;
-                const bool peOk = SafeProcessEvent(reinterpret_cast<void*>(w.Obj),
-                                                   reinterpret_cast<void*>(setTr), &tr);
+                // Per-frame discriminator: gate on InteractionPrompt
+                // Container's ESlateVisibility. SN2 reuses one
+                // WBP_HoverTargetInfo for both world-hover prompts
+                // AND equipped-item action prompts (eg air-bladder
+                // Inhale/Ascend). The container is Collapsed/Hidden
+                // when no world interaction is in focus and Visible
+                // when one is. The diagnostic line below logs every
+                // other candidate child's vis too so we can re-pin
+                // if SN2 patches break the gate.
+                const std::uint8_t vGate = readVis(w.Gate,             w.GateCls);
+                const std::uint8_t vObj  = readVis(w.DiagObjectName,   w.DiagObjectNameCls);
+                const std::uint8_t vPri  = readVis(w.DiagPrimary,      w.DiagPrimaryCls);
+                const std::uint8_t vSec  = readVis(w.DiagSecondary,    w.DiagSecondaryCls);
+                const std::uint8_t vTb   = readVis(w.DiagToolbarTexts, w.DiagToolbarTextsCls);
+                // Container visibilities (kept for re-pin diagnostics) -
+                // all candidate children are always "drawn", so this
+                // signal alone doesn't gate. Real gate is below.
+                (void)vGate; (void)vObj; (void)vPri; (void)vSec; (void)vTb;
+                // Real gate: SN2HoverTargetViewModel + 0x70 holds a 64-bit
+                // hover-target identity token. Zero when the player is not
+                // aiming at a hoverable (button-bar action prompt context
+                // - leave widget fixed). Non-zero when world-hover is
+                // active (interactable in focus - follow the reticle).
+                // Empirical: across a swim-with-bladder + look-at-
+                // fabricator session, every other VM qword stayed
+                // constant; vm+0x70 toggled 0 <-> non-zero in lockstep
+                // with the on-screen prompt mode. The container-vis
+                // probe above is left in for diag continuity (re-pin
+                // if SN2 patches change the VM layout).
+                std::uintptr_t hoverToken = 0;
+                if (w.HoverVM)
+                    SafeReadPtr(w.HoverVM + 0x70, hoverToken);
+                const bool worldHover = (hoverToken != 0);
+                if (logThis) {
+                    Log::Line("  gate 0x%llx vis Container=%u ObectName=%u Primary=%u Secondary=%u ToolbarTexts=%u vm+0x70=0x%llx worldHover=%d",
+                        static_cast<unsigned long long>(w.Obj),
+                        vGate, vObj, vPri, vSec, vTb,
+                        static_cast<unsigned long long>(hoverToken),
+                        worldHover ? 1 : 0);
+                }
+                // SetRenderTranslation is sticky AND moving the
+                // WBP_HoverTargetInfo PARENT widget translates every
+                // child inside it - which includes ToolbarTexts (where
+                // the air-bladder Inhale/Ascend prompt lives). So moving
+                // the parent always drags the bladder prompt along
+                // regardless of whether the gate is right. The fix is to
+                // translate only the world-hover-specific children:
+                // TextBlock_ObectName (world-object name display) and
+                // InteractionPromptContainer (icon + button glyph
+                // overlay). ToolbarTexts stays untouched, so the bladder
+                // prompt remains screen-fixed. (0, 0) reset still applies
+                // - SetRenderTranslation persists until cleared.
+                tr.X = worldHover ? static_cast<double>(dx) : 0.0;
+                tr.Y = worldHover ? static_cast<double>(dy) : 0.0;
+                // Belt-and-suspenders: also (0, 0) the parent in case a
+                // previous build left a stuck translation there.
+                struct { double X; double Y; char pad[16]; } trZero{};
+                SafeProcessEvent(reinterpret_cast<void*>(w.Obj),
+                                 reinterpret_cast<void*>(setTr), &trZero);
+                bool peOk = false;
+                if (w.DiagObjectName) {
+                    std::uintptr_t live = 0;
+                    if (SafeReadPtr(w.DiagObjectName + Offsets::UObjectGlobals::kClassPrivate, live)
+                        && live == w.DiagObjectNameCls) {
+                        peOk = SafeProcessEvent(reinterpret_cast<void*>(w.DiagObjectName),
+                                                reinterpret_cast<void*>(setTr), &tr);
+                    }
+                }
+                if (w.Gate) {
+                    std::uintptr_t live = 0;
+                    if (SafeReadPtr(w.Gate + Offsets::UObjectGlobals::kClassPrivate, live)
+                        && live == w.GateCls) {
+                        SafeProcessEvent(reinterpret_cast<void*>(w.Gate),
+                                         reinterpret_cast<void*>(setTr), &tr);
+                    }
+                }
                 if (logThis) {
                     // Read +0x90/+0x94 as floats AND +0x90/+0x98 as doubles so
                     // we can tell whether RenderTransform.Translation is laid
