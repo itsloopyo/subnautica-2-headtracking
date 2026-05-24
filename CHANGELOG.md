@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.0] - 2026-05-24
+
+### Other
+
+- Gate tooltip follow on world-hover viewmodel token
+- SN2 patch watch: record buildid 23357846 [skip ci]
+- Add Game Pass (WinGDK) support via dxgi proxy + build profile registry
+- data: add Ni no Kuni Remastered and Yakuza 0; switch find-game output to UTF-8
+- detection: add Xbox/GDK build support for Subnautica 2 (and any future GDK title)
+- Fix install.ps1 plugins/ lookup for release ZIP layout
+
 ## [0.1.0] - 2026-05-23
 
 ### Other
