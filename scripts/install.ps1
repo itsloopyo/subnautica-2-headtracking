@@ -109,9 +109,12 @@ if ($installs.Count -eq 0) {
     exit 1
 }
 
-# Source dir for the planted DLL + ini. Release ZIP: scripts/../plugins/. Dev
-# tree (not the normal path here): same layout.
-$srcDir = Join-Path $projectRoot 'plugins'
+# Source dir for the planted DLL + ini. Release ZIP: plugins/ sits next to
+# install.ps1 ($scriptDir). Dev-tree fallback: $projectRoot/plugins.
+$srcDir = Join-Path $scriptDir 'plugins'
+if (-not (Test-Path $srcDir)) {
+    $srcDir = Join-Path $projectRoot 'plugins'
+}
 if (-not (Test-Path $srcDir)) {
     throw "plugins/ folder not found next to install.ps1. Installer ZIP is corrupt."
 }
