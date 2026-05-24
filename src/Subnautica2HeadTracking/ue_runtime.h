@@ -2,7 +2,7 @@
 #include <cstdint>
 #include <string>
 
-#include "ghidra_offsets.h"
+#include "builds/build_registry.h"
 #include "ue_math.h"
 
 // Runtime access to the live UE5 process: fault-guarded memory reads/writes,
@@ -41,21 +41,21 @@ namespace Subnautica2HeadTracking::ue
     void ForEachUObject(Fn&& visit)
     {
         if (ModuleBase() == 0) return;
-        const std::uintptr_t objArr =
-            ModuleBase() + Offsets::UObjectGlobals::kObjObjects;
+        const auto& off = Offsets().UObjectGlobals;
+        const std::uintptr_t objArr = ModuleBase() + off.kObjObjects;
         std::uintptr_t chunks = 0;
         std::uint32_t num = 0;
         if (!SafeReadPtr(objArr, chunks) || !chunks) return;
-        if (!SafeReadU32(objArr + Offsets::UObjectGlobals::kObjObjects_Num, num)) return;
+        if (!SafeReadU32(objArr + off.kObjObjects_Num, num)) return;
         if (num == 0 || num > 0x4000000) return;
         for (std::uint32_t i = 0; i < num; ++i) {
             std::uintptr_t chunk = 0;
             if (!SafeReadPtr(chunks + (static_cast<std::uintptr_t>(
-                    i / Offsets::UObjectGlobals::kChunkNumElems) * 8), chunk) || !chunk)
+                    i / off.kChunkNumElems) * 8), chunk) || !chunk)
                 continue;
             const std::uintptr_t item = chunk +
-                static_cast<std::uintptr_t>(i % Offsets::UObjectGlobals::kChunkNumElems)
-                    * Offsets::UObjectGlobals::kFUObjectItemSize;
+                static_cast<std::uintptr_t>(i % off.kChunkNumElems)
+                    * off.kFUObjectItemSize;
             std::uintptr_t obj = 0;
             if (!SafeReadPtr(item, obj) || !obj) continue;
             if (visit(obj)) return;

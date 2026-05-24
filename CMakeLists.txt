@@ -109,6 +109,9 @@ add_library(${MOD_NAME} SHARED
     src/Subnautica2HeadTracking/logging.cpp
     src/Subnautica2HeadTracking/reticle_overlay.cpp
     src/Subnautica2HeadTracking/ue_runtime.cpp
+    src/Subnautica2HeadTracking/builds/build_registry.cpp
+    src/Subnautica2HeadTracking/builds/steam_offsets.cpp
+    src/Subnautica2HeadTracking/builds/gdk_offsets.cpp
 )
 
 target_include_directories(${MOD_NAME} PRIVATE
@@ -138,6 +141,6 @@ target_link_libraries(${MOD_NAME} PRIVATE
 )
 
 set_target_properties(${MOD_NAME} PROPERTIES
-    SUFFIX ".asi"
-    OUTPUT_NAME "Subnautica2HeadTracking"
+    SUFFIX ".dll"
+    OUTPUT_NAME "dxgi"
 )

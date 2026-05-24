@@ -101,9 +101,9 @@ namespace Subnautica2HeadTracking::ue
     std::string ResolveFName(std::uint32_t id)
     {
         if (g_moduleBase == 0) return std::string();
+        const auto& off = Offsets().UObjectGlobals;
         const std::uintptr_t blocks =
-            g_moduleBase + Offsets::UObjectGlobals::kFNamePool
-                         + Offsets::UObjectGlobals::kFNamePoolBlocks;
+            g_moduleBase + off.kFNamePool + off.kFNamePoolBlocks;
         std::uintptr_t blockPtr = 0;
         if (!SafeReadPtr(blocks + (static_cast<std::uintptr_t>(id >> 16) * 8), blockPtr))
             return std::string();
@@ -135,7 +135,7 @@ namespace Subnautica2HeadTracking::ue
     std::string ObjectName(std::uintptr_t obj)
     {
         std::uint32_t id = 0;
-        if (!SafeReadU32(obj + Offsets::UObjectGlobals::kNamePrivate, id))
+        if (!SafeReadU32(obj + Offsets().UObjectGlobals.kNamePrivate, id))
             return std::string();
         return ResolveFName(id);
     }
@@ -143,7 +143,7 @@ namespace Subnautica2HeadTracking::ue
     std::string ClassName(std::uintptr_t obj)
     {
         std::uintptr_t cls = 0;
-        if (!SafeReadPtr(obj + Offsets::UObjectGlobals::kClassPrivate, cls) || !cls)
+        if (!SafeReadPtr(obj + Offsets().UObjectGlobals.kClassPrivate, cls) || !cls)
             return std::string();
         return ObjectName(cls);
     }
@@ -151,7 +151,7 @@ namespace Subnautica2HeadTracking::ue
     std::string OuterName(std::uintptr_t obj)
     {
         std::uintptr_t outer = 0;
-        if (!SafeReadPtr(obj + Offsets::UObjectGlobals::kOuterPrivate, outer) || !outer)
+        if (!SafeReadPtr(obj + Offsets().UObjectGlobals.kOuterPrivate, outer) || !outer)
             return std::string();
         return ObjectName(outer);
     }

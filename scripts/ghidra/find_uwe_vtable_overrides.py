@@ -1,6 +1,6 @@
 # Compare AUWEPlayerCameraManager's vtable to its parent (APlayerCameraManager)
 # vtable and identify the slots where UWE overrode something. UWE overrides
-# are the high-value hook targets — those are the per-frame customizations
+# are the high-value hook targets - those are the per-frame customizations
 # Subnautica 2's camera code adds on top of stock UE5.
 #
 # We don't have a confirmed parent-vtable address yet. The constructor at

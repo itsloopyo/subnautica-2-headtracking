@@ -3,10 +3,10 @@
 <#
 .SYNOPSIS
   Compare the installed Subnautica 2 EXE's PE fingerprint against the
-  values committed in src/Subnautica2HeadTracking/ghidra_offsets.h.
+  values committed in src/Subnautica2HeadTracking/builds/steam_offsets.cpp.
 .DESCRIPTION
   Same three-field check (TimeDateStamp / SizeOfImage / CheckSum) that
-  ValidateRunningBuild runs at mod load time. Use after a Steam patch
+  builds::SelectProfile runs at mod load time. Use after a Steam patch
   lands to find out whether RVAs need rederiving before shipping a new
   mod version.
 
@@ -79,23 +79,22 @@ function Read-PEFingerprint {
 
 function Read-ExpectedFingerprint {
     param([string]$ProjectDir)
-    $headerPath = Join-Path $ProjectDir 'src/Subnautica2HeadTracking/ghidra_offsets.h'
-    if (-not (Test-Path $headerPath)) {
-        throw "ghidra_offsets.h not found at $headerPath"
+    # steam_offsets.cpp ships Fingerprint as a struct initialiser literal:
+    #   /* Fingerprint */ { 0xb727d315u, 0x0ddcb000u, 0x0d7d4cc3u },
+    # Grab the three hex words after the Fingerprint comment.
+    $cppPath = Join-Path $ProjectDir 'src/Subnautica2HeadTracking/builds/steam_offsets.cpp'
+    if (-not (Test-Path $cppPath)) {
+        throw "steam_offsets.cpp not found at $cppPath"
     }
-    $header = Get-Content -Raw $headerPath
-    $values = @{}
-    foreach ($name in @('kTimeDateStamp', 'kSizeOfImage', 'kCheckSum')) {
-        $pattern = [regex]::Escape($name) + '\s*=\s*0x([0-9a-fA-F]+)u?\s*;'
-        if ($header -notmatch $pattern) {
-            throw "$name not found in ghidra_offsets.h"
-        }
-        $values[$name] = [Convert]::ToUInt32($Matches[1], 16)
+    $cpp = Get-Content -Raw $cppPath
+    $pattern = 'Fingerprint\s*\*/\s*\{\s*0x([0-9a-fA-F]+)u?\s*,\s*0x([0-9a-fA-F]+)u?\s*,\s*0x([0-9a-fA-F]+)u?\s*\}'
+    if ($cpp -notmatch $pattern) {
+        throw 'Fingerprint initialiser not found in steam_offsets.cpp'
     }
     return [pscustomobject]@{
-        TimeDateStamp = $values['kTimeDateStamp']
-        SizeOfImage   = $values['kSizeOfImage']
-        CheckSum      = $values['kCheckSum']
+        TimeDateStamp = [Convert]::ToUInt32($Matches[1], 16)
+        SizeOfImage   = [Convert]::ToUInt32($Matches[2], 16)
+        CheckSum      = [Convert]::ToUInt32($Matches[3], 16)
     }
 }
 

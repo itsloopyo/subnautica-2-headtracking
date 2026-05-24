@@ -34,9 +34,9 @@ jobs:
       - name: Verify build outputs
         shell: pwsh
         run: |
-          $asi = "build/Release/Subnautica2HeadTracking.asi"
-          if (-not (Test-Path $asi)) {
-            Write-Host "::error::Missing build artifact: $asi"
+          $dxgi = "build/Release/dxgi.dll"
+          if (-not (Test-Path $dxgi)) {
+            Write-Host "::error::Missing build artifact: $dxgi"
             exit 1
           }
           Write-Host "Build outputs:"

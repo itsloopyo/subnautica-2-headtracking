@@ -11,7 +11,7 @@ An unofficial decoupled look+aim head tracking mod for Subnautica 2, look around
 
 ## Requirements
 
-- [Subnautica 2 on Steam](https://store.steampowered.com/app/1962700/Subnautica_2/).
+- Subnautica 2, either the [Steam build](https://store.steampowered.com/app/1962700/Subnautica_2/) or the Game Pass / Xbox app build. Both store versions are supported; the installer auto-detects whichever (or both) you have.
 - An [OpenTrack](https://github.com/opentrack/opentrack)-compatible head tracker (VR headset, webcam, or phone app).
 - Windows 10 or 11, 64-bit.
 
@@ -23,29 +23,90 @@ An unofficial decoupled look+aim head tracking mod for Subnautica 2, look around
 4. Configure OpenTrack to output UDP to `127.0.0.1:4242`.
 5. Launch the game.
 
-If the installer cannot find your game, point it at the install folder
+`install.cmd` finds every installed copy of Subnautica 2 on your machine
+and deploys to all of them. If you have both Steam and Game Pass
+installed, both are mod-enabled in one pass.
+
+If the installer cannot find your game, point it at the install root
 directly with a positional argument:
 
 ```powershell
-install.cmd "D:\Games\Subnautica 2\Content"
+install.cmd "D:\Games\Subnautica 2"               :: Steam-layout root
+install.cmd "C:\XboxGames\Subnautica 2\Content"   :: Game Pass root
 ```
 
 or set the `SUBNAUTICA_2_PATH` environment variable to your install root.
 
+### Game Pass / Xbox App Notes
+
+The Xbox app install is more locked down than the Steam install. Use the
+game's `Content` folder as the root, normally:
+
+```cmd
+C:\XboxGames\Subnautica 2\Content
+```
+
+The mod files must end up here:
+
+```cmd
+C:\XboxGames\Subnautica 2\Content\Subnautica2\Binaries\WinGDK\
+```
+
+`install.cmd` copies the mod there and also plants `dxgi_orig.dll` from
+your own Windows install. If Windows denies the copy, close the Xbox app,
+right-click `install.cmd`, choose **Run as administrator**, and pass the
+Content path if auto-detection still fails:
+
+```cmd
+install.cmd "C:\XboxGames\Subnautica 2\Content"
+```
+
 ### Manual Installation
 
-If you would rather place the files by hand, drop the Ultimate ASI Loader
-(`winmm.dll`) and the mod files into the game's binaries folder:
+If you would rather place the files by hand, drop the mod into the
+binaries folder for whichever build you have:
 
-```
-<game>\Subnautica2\Binaries\Win64\
+| Store     | Target folder |
+|-----------|---------------|
+| Steam     | `<steam>\steamapps\common\Subnautica2\Subnautica2\Binaries\Win64\` |
+| Game Pass | `C:\XboxGames\Subnautica 2\Content\Subnautica2\Binaries\WinGDK\`   |
+
+You need three files in that folder:
+
+1. `dxgi.dll` - the mod itself (from the release ZIP's `plugins/`). This
+   is a DXGI proxy: every DXGI call the game makes flows through us,
+   which is how we hook the camera path. The same `dxgi.dll` works for
+   both Steam and Game Pass; the proxy fingerprints the running exe and
+   selects the right RVA profile at load time.
+2. `dxgi_orig.dll` - **a copy of your own `C:\Windows\System32\dxgi.dll`**.
+   The mod's exports forward here, so the game still reaches the real
+   DXGI through us. Copy it yourself, matching whichever build you have:
+   ```cmd
+   :: Steam
+   copy C:\Windows\System32\dxgi.dll "<steam>\steamapps\common\Subnautica2\Subnautica2\Binaries\Win64\dxgi_orig.dll"
+   :: Game Pass
+   copy C:\Windows\System32\dxgi.dll "C:\XboxGames\Subnautica 2\Content\Subnautica2\Binaries\WinGDK\dxgi_orig.dll"
+   ```
+3. `HeadTracking.ini` - mod configuration.
+
+The Nexus ZIP contains both `Binaries\Win64\` and `Binaries\WinGDK\`
+trees in one bundle. Extract it at the package root and the files land
+in the right place for whichever build you have - the unused folder is
+harmless. You still need to do the `dxgi_orig.dll` copy step above. The
+GitHub installer ZIP's `install.cmd` does the copy automatically and
+hits both builds at once if both are installed.
+
+For the Xbox app build, extract the Nexus ZIP into:
+
+```cmd
+C:\XboxGames\Subnautica 2\Content
 ```
 
-The mod files are `Subnautica2HeadTracking.asi` and `HeadTracking.ini`.
-The Nexus ZIP contains only these mod files (no loader), laid out under
-`Subnautica2\Binaries\Win64\` - extract it into your game install root and
-they drop straight into place. You still need an ASI Loader present in that
-folder first.
+Then run this from an administrator Command Prompt:
+
+```cmd
+copy "C:\Windows\System32\dxgi.dll" "C:\XboxGames\Subnautica 2\Content\Subnautica2\Binaries\WinGDK\dxgi_orig.dll"
+```
 
 ## Setting Up OpenTrack
 
@@ -92,8 +153,20 @@ Two equivalent binding sets - use whichever your keyboard has:
 
 ## Configuration
 
-Settings live in `HeadTracking.ini`, next to the game executable in
-`Subnautica2\Binaries\Win64\`. Edit it and restart the game to apply changes.
+Settings live in `HeadTracking.ini`, next to the game executable
+(`Subnautica2\Binaries\Win64\` for Steam, `Subnautica2\Binaries\WinGDK\`
+for Game Pass). Edit it and restart the game to apply changes. If both
+builds are installed, each has its own copy of the file.
+
+On the Xbox app build, Windows may block normal saves under the game
+folder. Open Notepad as administrator, then open:
+
+```cmd
+C:\XboxGames\Subnautica 2\Content\Subnautica2\Binaries\WinGDK\HeadTracking.ini
+```
+
+If you installed the game to another drive or folder, use that install's
+`Content\Subnautica2\Binaries\WinGDK\HeadTracking.ini` path instead.
 
 ```ini
 [Network]
@@ -142,8 +215,9 @@ ToggleYawMode = 0x22
 
 **Mod not loading**
 
-- Confirm `winmm.dll` and `Subnautica2HeadTracking.asi` are in `Subnautica2\Binaries\Win64\`.
-- Windows may block the downloaded DLL: right-click it, Properties, then Unblock.
+- Confirm `dxgi.dll`, `dxgi_orig.dll`, and `HeadTracking.ini` are all in the binaries folder for your build - `Subnautica2\Binaries\Win64\` for Steam, `Subnautica2\Binaries\WinGDK\` for Game Pass. Missing `dxgi_orig.dll` is the most common cause - the proxy forwards every DXGI export there, so without it the game crashes on launch.
+- Windows may block the downloaded DLL: right-click `dxgi.dll`, Properties, then Unblock.
+- Check the mod log next to the DLL for a `build-check: PASS - matched profile ...` line.
 
 **No tracking response**
 
@@ -170,9 +244,11 @@ preserved.
 
 ## Uninstalling
 
-Run `uninstall.cmd`. This removes the mod DLLs. The mod loader (Ultimate
-ASI Loader) is only removed if the installer put it there. Use
-`uninstall.cmd /force` to remove it anyway.
+Run `uninstall.cmd`. This removes `dxgi.dll`, `dxgi_orig.dll`, and
+`HeadTracking.ini` from the binaries folder of every detected install
+(Steam and / or Game Pass). If you had a pre-existing `dxgi.dll` (e.g.
+ReShade) when you installed the mod, the original is restored from its
+`.backup` copy. Pass `/force` to discard the backup instead.
 
 ## Building from Source
 
@@ -192,11 +268,10 @@ MIT License - see [LICENSE](LICENSE) for details.
 ## Credits
 
 - [Unknown Worlds Entertainment](https://unknownworlds.com/) for [Subnautica 2](https://store.steampowered.com/app/1962700/Subnautica_2/).
-- [ThirteenAG](https://github.com/ThirteenAG) for the [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader).
 - The [OpenTrack](https://github.com/opentrack/opentrack) contributors for the head-tracking UDP protocol.
 - The [CameraUnlock shared core](https://github.com/itsloopyo/cameraunlock-core) for the head-tracking processing pipeline used across all our mods.
 
 ## Disclaimer
 
 This mod is not affiliated with, endorsed by, or supported by Unknown
-Worlds Entertainment. Use at your own risk.
+Worlds Entertainment or KRAFTON. Use at your own risk.

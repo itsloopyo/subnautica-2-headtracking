@@ -8,15 +8,23 @@
 # C:\temp\subnautica-2 and auto-analyzes. Subsequent runs reuse the project.
 
 param(
-    [Parameter(Mandatory = $true)][string]$Script
+    [Parameter(Mandatory = $true)][string]$Script,
+    # Optional override for the binary to analyse. Defaults to the Steam
+    # Subnautica 2 EXE. Pass the rebased WinGDK dump from scripts/dump-running-exe.ps1
+    # to discover RVAs for the Xbox/GDK profile (which lives behind a Process
+    # Trust ACE that blocks static read of the real EXE).
+    [string]$ProgramExe = "C:\Program Files (x86)\Steam\steamapps\common\Subnautica2\Subnautica2\Binaries\Win64\Subnautica2-Win64-Shipping.exe",
+    # Optional override for the Ghidra project name; the project lives under
+    # C:\temp\<ProjectName>. Use distinct names for Steam vs GDK so the two
+    # analyses don't collide.
+    [string]$ProjectName = "Subnautica2"
 )
 
 $ErrorActionPreference = "Stop"
 
 $GhidraRoot  = "C:\ProgramData\chocolatey\lib\ghidra\tools\ghidra_12.0_PUBLIC"
-$ProjectDir  = "C:\temp\subnautica-2"
-$ProjectNm   = "Subnautica2"
-$ProgramExe  = "C:\Program Files (x86)\Steam\steamapps\common\Subnautica2\Subnautica2\Binaries\Win64\Subnautica2-Win64-Shipping.exe"
+$ProjectDir  = "C:\temp\$ProjectName"
+$ProjectNm   = $ProjectName
 $ProgramNm   = [IO.Path]::GetFileName($ProgramExe)
 
 if (-not (Test-Path $GhidraRoot))  { throw "Ghidra not found at $GhidraRoot" }

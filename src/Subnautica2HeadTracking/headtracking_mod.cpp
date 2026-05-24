@@ -17,7 +17,7 @@
 #include <windows.h>
 #include <psapi.h>
 
-#include "ghidra_offsets.h"
+#include "builds/build_registry.h"
 #include "reticle_overlay.h"
 #include "ue_math.h"
 #include "ue_runtime.h"
@@ -47,8 +47,6 @@ namespace Subnautica2HeadTracking
 {
     namespace
     {
-        constexpr std::uintptr_t kGetPlayerViewPointRva = 0x043ed6f0;
-
         // UE math types, fault-guarded memory access, and UObject reflection
         // live in the ue namespace (ue_math.h / ue_runtime.h). Pull the names
         // into scope so the call sites below read unqualified.
@@ -506,9 +504,9 @@ namespace Subnautica2HeadTracking
                 SafeReadPtr(snap[i].srcObj + snap[i].srcOff, comp);
                 if (!comp) continue;
                 const std::uintptr_t rotTarget =
-                    comp + Offsets::USceneComponentLayout::kComponentToWorldRotation;
+                    comp + Offsets().USceneComponentLayout.kComponentToWorldRotation;
                 const std::uintptr_t locTarget =
-                    comp + Offsets::USceneComponentLayout::kComponentToWorldTranslation;
+                    comp + Offsets().USceneComponentLayout.kComponentToWorldTranslation;
                 FQuat4d oldRot{0, 0, 0, 1};
                 FVector oldLoc{};
                 if (!SafeReadFQuat(rotTarget, oldRot)) continue;
@@ -653,7 +651,7 @@ namespace Subnautica2HeadTracking
                 SafeReadPtr(snap[i].srcObj + snap[i].srcOff, comp);
                 if (!comp) continue;
                 const std::uintptr_t rotTarget =
-                    comp + Offsets::USceneComponentLayout::kComponentToWorldRotation;
+                    comp + Offsets().USceneComponentLayout.kComponentToWorldRotation;
                 FQuat4d cur{0, 0, 0, 1};
                 if (!SafeReadFQuat(rotTarget, cur)) continue;
 
@@ -701,7 +699,7 @@ namespace Subnautica2HeadTracking
             if (!comp) return;
 
             const std::uintptr_t target =
-                comp + Offsets::USceneComponentLayout::kComponentToWorldRotation;
+                comp + Offsets().USceneComponentLayout.kComponentToWorldRotation;
 
             // Read what's there BEFORE we overwrite. If this is our previously
             // written Q, the engine left it alone last frame; if it's
@@ -888,7 +886,7 @@ namespace Subnautica2HeadTracking
         template <typename T>
         bool ReticleWidgetLive(const T& w) {
             std::uintptr_t cls = 0;
-            return SafeReadPtr(w.Obj + Offsets::UObjectGlobals::kClassPrivate, cls)
+            return SafeReadPtr(w.Obj + Offsets().UObjectGlobals.kClassPrivate, cls)
                 && cls == w.Cls;
         }
 
@@ -923,7 +921,7 @@ namespace Subnautica2HeadTracking
                     const std::string cn = ClassName(obj);
                     if (ContainsCI(cn, "HoverTargetInfo")) {
                         std::uintptr_t cls = 0;
-                        if (SafeReadPtr(obj + Offsets::UObjectGlobals::kClassPrivate, cls) && cls) {
+                        if (SafeReadPtr(obj + Offsets().UObjectGlobals.kClassPrivate, cls) && cls) {
                             // Tentatively snapshot the current render
                             // translation. The publish step below
                             // decides whether this is the first
@@ -954,7 +952,7 @@ namespace Subnautica2HeadTracking
                                 if (!SafeReadPtr(obj + coff, cand) || !cand) continue;
                                 if ((cand & 0x7) != 0) continue;
                                 std::uintptr_t cls2 = 0;
-                                if (!SafeReadPtr(cand + Offsets::UObjectGlobals::kClassPrivate, cls2)
+                                if (!SafeReadPtr(cand + Offsets().UObjectGlobals.kClassPrivate, cls2)
                                     || !cls2) continue;
                                 const std::string nm = ObjectName(cand);
                                 if      (nm == "InteractionPromptContainer") { pGate=cand;    pGateCls=cls2; }
@@ -992,7 +990,7 @@ namespace Subnautica2HeadTracking
                                 std::uintptr_t cur = obj;
                                 for (int depth = 0; depth < 5; ++depth) {
                                     std::uintptr_t outer = 0;
-                                    if (!SafeReadPtr(cur + Offsets::UObjectGlobals::kOuterPrivate, outer) || !outer)
+                                    if (!SafeReadPtr(cur + Offsets().UObjectGlobals.kOuterPrivate, outer) || !outer)
                                         break;
                                     Log::Line("  outer[%d] 0x%llx class=%s name=%s",
                                         depth,
@@ -1010,7 +1008,7 @@ namespace Subnautica2HeadTracking
                 for (const char* nm : kReticleNames) {
                     if (on == nm) {
                         std::uintptr_t cls = 0;
-                        if (SafeReadPtr(obj + Offsets::UObjectGlobals::kClassPrivate, cls) && cls)
+                        if (SafeReadPtr(obj + Offsets().UObjectGlobals.kClassPrivate, cls) && cls)
                             found.push_back({obj, cls});
                         return false;
                     }
@@ -1107,7 +1105,7 @@ namespace Subnautica2HeadTracking
                             if (!SafeReadPtr(tips[i].Obj + coff, cand) || !cand) continue;
                             if ((cand & 0x7) != 0) continue;
                             std::uintptr_t cls2 = 0;
-                            if (!SafeReadPtr(cand + Offsets::UObjectGlobals::kClassPrivate, cls2)
+                            if (!SafeReadPtr(cand + Offsets().UObjectGlobals.kClassPrivate, cls2)
                                 || !cls2) continue;
                             const std::string ccn = ClassName(cand);
                             if (ccn.empty()) continue;
@@ -1286,8 +1284,9 @@ namespace Subnautica2HeadTracking
         // USceneComponentLayout) and a 5-level Outer chain. Press while the
         // air-bladder is equipped AND its prompt is visible.
         void DumpWidgetComponents() {
-            using Offsets::USceneComponentLayout::kComponentToWorldTranslation;
-            using Offsets::UObjectGlobals::kOuterPrivate;
+            const auto kComponentToWorldTranslation =
+                Offsets().USceneComponentLayout.kComponentToWorldTranslation;
+            const auto kOuterPrivate = Offsets().UObjectGlobals.kOuterPrivate;
             std::size_t hits = 0;
             ForEachUObject([&](std::uintptr_t obj) -> bool {
                 const std::string cn = ClassName(obj);
@@ -1328,9 +1327,9 @@ namespace Subnautica2HeadTracking
         // on-screen reticle from always-"Visible" UMG widget-tree templates.
         bool InGameplay(std::uintptr_t controller) {
             std::uint32_t v = 0;
-            if (!SafeReadU32(controller + Offsets::PlayerController::kShowMouseCursorOffset, v))
+            if (!SafeReadU32(controller + Offsets().PlayerController.kShowMouseCursorOffset, v))
                 return false;
-            return (v & Offsets::PlayerController::kShowMouseCursorMask) == 0;
+            return (v & Offsets().PlayerController.kShowMouseCursorMask) == 0;
         }
 
         // Per render frame: force the InteractionIcon reticle to opacity 0 via
@@ -1423,7 +1422,7 @@ namespace Subnautica2HeadTracking
             auto readVis = [&](std::uintptr_t child, std::uintptr_t childCls) -> std::uint8_t {
                 if (!child || !getVis) return 0xff;
                 std::uintptr_t live = 0;
-                if (!SafeReadPtr(child + Offsets::UObjectGlobals::kClassPrivate, live)
+                if (!SafeReadPtr(child + Offsets().UObjectGlobals.kClassPrivate, live)
                     || live != childCls) return 0xff;
                 std::uint8_t v = 0xff;
                 SafeProcessEvent(reinterpret_cast<void*>(child),
@@ -1494,7 +1493,7 @@ namespace Subnautica2HeadTracking
                 bool peOk = false;
                 if (w.DiagObjectName) {
                     std::uintptr_t live = 0;
-                    if (SafeReadPtr(w.DiagObjectName + Offsets::UObjectGlobals::kClassPrivate, live)
+                    if (SafeReadPtr(w.DiagObjectName + Offsets().UObjectGlobals.kClassPrivate, live)
                         && live == w.DiagObjectNameCls) {
                         peOk = SafeProcessEvent(reinterpret_cast<void*>(w.DiagObjectName),
                                                 reinterpret_cast<void*>(setTr), &tr);
@@ -1502,7 +1501,7 @@ namespace Subnautica2HeadTracking
                 }
                 if (w.Gate) {
                     std::uintptr_t live = 0;
-                    if (SafeReadPtr(w.Gate + Offsets::UObjectGlobals::kClassPrivate, live)
+                    if (SafeReadPtr(w.Gate + Offsets().UObjectGlobals.kClassPrivate, live)
                         && live == w.GateCls) {
                         SafeProcessEvent(reinterpret_cast<void*>(w.Gate),
                                          reinterpret_cast<void*>(setTr), &tr);
@@ -1530,27 +1529,14 @@ namespace Subnautica2HeadTracking
             }
         }
 
-        // Re-bisected from a runtime caller-summary after the 2026-05-19 patch
-        // (GPV is virtual; callers can't be relocated statically). Mapped 1:1
-        // to the pre-patch list by RVA proximity + per-frame hit count. Re-run
-        // with inject-mode 0 and re-derive from caller-summary after any patch.
-        constexpr std::array<std::uintptr_t, 11> kKnownCallerRvas = {
-            0x06329c08,  // 1: ~22/frame, dominant
-            0x04171af7,  // 2: ~4/frame  <- render (FMinimalViewInfo builder, fn 0x41718b0)
-            0x043eae77,  // 3: ~2/frame
-            0x00000000,  // 4: intermittent; did not fire during re-bisection (unconfirmed)
-            0x03fc993c,  // 5: ~1/frame
-            0x04177e2d,  // 6: ~1/frame
-            0x02b5de88,  // 7: ~1/frame
-            0x051149d1,  // 8: ~1/frame
-            0x063e82d9,  // 9: ~1/frame
-            0x05106f00,  // 10: one-shot at startup
-            0x068d91a5,  // 11: rare
-        };
+        // Inject-mode caller-RVA table lives on the active build profile
+        // (see builds/build_profile.h, Offsets().kKnownCallerRvas). GPV is virtual, so
+        // callers can't be relocated statically; re-bisect via inject-mode 0
+        // + caller-summary after a patch and refresh the profile.
 
         // Injection mode controls which call-sites get head-tracking applied.
         // 0  = all callers (entangles aim with view - diagnostic only)
-        // 1..11 = inject only for kKnownCallerRvas[mode-1]
+        // 1..11 = inject only for Offsets().kKnownCallerRvas[mode-1]
         // 12 = no caller (head tracking disabled at the hook)
         // 13 = all per-frame callers (modes 5-9 grouped)
         // 14 = all tier 1+2 callers (modes 1-4 grouped)
@@ -1579,17 +1565,17 @@ namespace Subnautica2HeadTracking
             if (mode == 0) return true;
             if (mode == 12) return false;
             if (mode >= 1 && mode <= 11) {
-                return retRva == kKnownCallerRvas[mode - 1];
+                return retRva == Offsets().kKnownCallerRvas[mode - 1];
             }
             if (mode == 13) {
                 for (int i = 4; i <= 8; ++i) {
-                    if (retRva == kKnownCallerRvas[i]) return true;
+                    if (retRva == Offsets().kKnownCallerRvas[i]) return true;
                 }
                 return false;
             }
             if (mode == 14) {
                 for (int i = 0; i <= 3; ++i) {
-                    if (retRva == kKnownCallerRvas[i]) return true;
+                    if (retRva == Offsets().kKnownCallerRvas[i]) return true;
                 }
                 return false;
             }
@@ -1676,7 +1662,7 @@ namespace Subnautica2HeadTracking
             {
                 std::uintptr_t pawnNow = 0;
                 SafeReadPtr(reinterpret_cast<std::uintptr_t>(self)
-                                + Offsets::PlayerController::kPawn, pawnNow);
+                                + Offsets().PlayerController.kPawn, pawnNow);
                 if (pawnNow) g_currentPawn.store(pawnNow);
             }
 
@@ -1705,7 +1691,7 @@ namespace Subnautica2HeadTracking
             {
                 const auto selfA = reinterpret_cast<std::uintptr_t>(self);
                 std::uintptr_t pawn = 0;
-                SafeReadPtr(selfA + Offsets::PlayerController::kPawn, pawn);
+                SafeReadPtr(selfA + Offsets().PlayerController.kPawn, pawn);
                 if (pawn && pawn != g_lastHarvestedPawn.load()) {
                     g_lastHarvestedPawn.store(pawn);
                     CollectReticleWidgets();
@@ -1719,7 +1705,7 @@ namespace Subnautica2HeadTracking
                     HarvestMaskCandidates("ctl",  selfA, 0x1000,
                         postLoc.X, postLoc.Y, postLoc.Z);
                     std::uintptr_t camMgr = 0;
-                    SafeReadPtr(selfA + Offsets::PlayerController::kPlayerCameraManager,
+                    SafeReadPtr(selfA + Offsets().PlayerController.kPlayerCameraManager,
                                 camMgr);
                     if (camMgr) HarvestMaskCandidates("cm", camMgr, 0x2000,
                         postLoc.X, postLoc.Y, postLoc.Z);
@@ -1977,61 +1963,12 @@ namespace Subnautica2HeadTracking
                 g_maskMarks.size(), g_maskCompEnabled.load() ? "ON" : "OFF");
         }
 
-        // Fail-safe: confirm the running EXE is the exact build every RVA in
-        // ghidra_offsets.h was derived from before we hook anything. A game
-        // patch relinks the binary and shifts every offset; hooking a stale
-        // RVA then patches a jump into unrelated code and crashes the game a
-        // couple of seconds in. We can't trust stale offsets, so on any
-        // mismatch we log loudly and run fully vanilla (no hooks, no UObject
-        // table walks). Three independent PE fields must all match the build
-        // the offsets target - any single difference means a different build.
-        enum class BuildCheck {
-            Match,
-            ReadFailed,  // couldn't read PE headers
-            ExeNewer,    // game updated since this mod was built
-            ExeOlder,    // game is older than this mod targets
-            ExeDiffers,  // same TimeDateStamp, different size/checksum (rare)
-        };
-        BuildCheck ValidateRunningBuild()
-        {
-            const auto base = reinterpret_cast<const std::uint8_t*>(GetModuleHandleW(nullptr));
-            if (!base) {
-                Log::Line("build-check: GetModuleHandle(nullptr) returned null - disabling");
-                return BuildCheck::ReadFailed;
-            }
-            const auto e_lfanew = *reinterpret_cast<const std::uint32_t*>(base + 0x3c);
-            const std::uint8_t* nt = base + e_lfanew;
-            if (*reinterpret_cast<const std::uint32_t*>(nt) != 0x00004550u /* "PE\0\0" */) {
-                Log::Line("build-check: PE signature not found - disabling");
-                return BuildCheck::ReadFailed;
-            }
-            // COFF FileHeader starts at nt+4; TimeDateStamp at +8 within it.
-            // Optional header starts at nt+0x18; SizeOfImage @+0x38, CheckSum
-            // @+0x40 (PE32+).
-            const std::uint32_t timeDateStamp = *reinterpret_cast<const std::uint32_t*>(nt + 4 + 4);
-            const std::uint8_t* opt = nt + 4 + 20;
-            const std::uint32_t sizeOfImage = *reinterpret_cast<const std::uint32_t*>(opt + 0x38);
-            const std::uint32_t checkSum    = *reinterpret_cast<const std::uint32_t*>(opt + 0x40);
-
-            using namespace Offsets::BuildFingerprint;
-            Log::Line("build-check: running  ts=0x%08x size=0x%08x csum=0x%08x",
-                timeDateStamp, sizeOfImage, checkSum);
-            Log::Line("build-check: expected ts=0x%08x size=0x%08x csum=0x%08x",
-                kTimeDateStamp, kSizeOfImage, kCheckSum);
-
-            if (timeDateStamp == kTimeDateStamp
-             && sizeOfImage   == kSizeOfImage
-             && checkSum      == kCheckSum) {
-                return BuildCheck::Match;
-            }
-            // TimeDateStamp is a Unix epoch in the COFF header. A relink (every
-            // game patch) bumps it monotonically, so it's a reliable direction
-            // indicator. Size/checksum drift without a timestamp change would
-            // be a tampered or hand-patched EXE.
-            if (timeDateStamp > kTimeDateStamp) return BuildCheck::ExeNewer;
-            if (timeDateStamp < kTimeDateStamp) return BuildCheck::ExeOlder;
-            return BuildCheck::ExeDiffers;
-        }
+        // Fail-safe build identification. Fingerprints the running EXE (PE
+        // TimeDateStamp + SizeOfImage + CheckSum) against each profile in the
+        // builds registry; a match installs that profile as the active source
+        // of RVAs and field offsets. No match leaves the mod dormant - a game
+        // patch relinks the binary and shifts every offset, so hooking a stale
+        // RVA would patch a jump into unrelated code and crash the game.
 
         bool InstallCameraHook()
         {
@@ -2055,11 +1992,11 @@ namespace Subnautica2HeadTracking
                 static_cast<unsigned long long>(end),
                 static_cast<unsigned long long>(end - base));
 
-            void* target = reinterpret_cast<void*>(base + kGetPlayerViewPointRva);
+            void* target = reinterpret_cast<void*>(base + Offsets().kGetPlayerViewPointRva);
             Log::Line("Module base=0x%llx target=0x%llx (RVA 0x%llx)",
                 static_cast<unsigned long long>(base),
                 static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(target)),
-                static_cast<unsigned long long>(kGetPlayerViewPointRva));
+                static_cast<unsigned long long>(Offsets().kGetPlayerViewPointRva));
 
             using cameraunlock::hooks::HookManager;
             using cameraunlock::hooks::HookStatus;
@@ -2106,28 +2043,28 @@ namespace Subnautica2HeadTracking
             Log::Line("Subnautica 2 Head Tracking - bootstrap");
             Log::Line("Process: PID=%lu", GetCurrentProcessId());
 
-            const auto buildCheck = ValidateRunningBuild();
-            if (buildCheck != BuildCheck::Match) {
+            const auto matchResult = builds::SelectProfile(GetModuleHandleW(nullptr));
+            if (matchResult != builds::MatchResult::Matched) {
                 Log::Line("============================================================");
                 Log::Line(" GAME BUILD MISMATCH - HEAD TRACKING DISABLED");
-                switch (buildCheck) {
-                    case BuildCheck::ExeNewer:
-                        Log::Line(" Subnautica 2 is NEWER than this mod was built for.");
+                switch (matchResult) {
+                    case builds::MatchResult::HostNewer:
+                        Log::Line(" Subnautica 2 is NEWER than any build this mod knows.");
                         Log::Line(" The game was updated - check the Releases page");
                         Log::Line(" for a matching mod version:");
                         Log::Line(" https://github.com/itsloopyo/subnautica-2-headtracking/releases");
                         break;
-                    case BuildCheck::ExeOlder:
-                        Log::Line(" Subnautica 2 is OLDER than this mod was built for.");
+                    case builds::MatchResult::HostOlder:
+                        Log::Line(" Subnautica 2 is OLDER than any build this mod knows.");
                         Log::Line(" Let Steam finish updating the game, then relaunch.");
                         break;
-                    case BuildCheck::ExeDiffers:
-                        Log::Line(" The Subnautica 2 EXE differs from the build this mod");
-                        Log::Line(" targets (same timestamp, different size/checksum).");
+                    case builds::MatchResult::HostDiffers:
+                        Log::Line(" The Subnautica 2 EXE differs from every build this mod");
+                        Log::Line(" knows (same timestamp, different size/checksum).");
                         Log::Line(" Unexpected - if you haven't modified the EXE, please");
                         Log::Line(" file an issue on the repo.");
                         break;
-                    case BuildCheck::ReadFailed:
+                    case builds::MatchResult::ReadFailed:
                         Log::Line(" Could not read the game's PE headers (see log above).");
                         break;
                     default: break;
@@ -2137,7 +2074,8 @@ namespace Subnautica2HeadTracking
                 Log::Line("============================================================");
                 return 0;  // no hooks, no UObject walks - game runs vanilla
             }
-            Log::Line("build-check: PASS - offsets match this build, arming");
+            Log::Line("build-check: PASS - matched profile %s, arming",
+                builds::ActiveProfile().Name);
 
             LoadMaskMarks();
 
@@ -2295,11 +2233,194 @@ namespace Subnautica2HeadTracking
                 g_injectMode.store(next);
                 if (next >= 1 && next <= 11) {
                     Log::Line("inject-mode -> %d  (caller [%d] RVA 0x%08llx ONLY)",
-                        next, next, static_cast<unsigned long long>(kKnownCallerRvas[next - 1]));
+                        next, next, static_cast<unsigned long long>(Offsets().kKnownCallerRvas[next - 1]));
                 } else {
                     Log::Line("inject-mode -> %d  (%s)", next, InjectModeName(next));
                 }
             });
+#if 0 // ---- GDK profile bisection probes (kept commented for next-patch use) ----
+            // F2: jump straight to inject-mode 0 to enable the caller-summary
+            // dump that re-derives kKnownCallerRvas. F3: dump live
+            // FUObjectArray + FNamePool state, sweep candidate RVAs, log
+            // distinct class names walked - used to find kObjObjects /
+            // kFNamePool offsets when a patch shifts them. Both are pure
+            // diagnostic; uncomment the block when bisecting a new build.
+            g_hotkeys->AddHotkey(VK_F2, []() {
+                g_injectMode.store(0);
+                Log::Line("inject-mode -> 0  (ALL callers; caller-summary dump every ~30s)");
+            });
+            g_hotkeys->AddHotkey(VK_F3, []() {
+                // Sweep every candidate RVA in the GUObjectArray allocator's
+                // write cluster (extracted from rederive_all.py output) and
+                // identify the one that decodes as FFixedUObjectArray: heap
+                // pointer at +0x00 (chunks array), int32 in [100000, 1000000]
+                // at +0x14 (NumElements), and chunks[0] is a heap pointer
+                // pointing at FUObjectItems (first 8 bytes = a UObject* with
+                // a module-internal vtable).
+                {
+                    const std::uintptr_t b = ue::ModuleBase();
+                    const std::uintptr_t candidates[] = {
+                        0x0bce8410ULL, 0x0bce8550ULL, 0x0bce8770ULL,
+                        0x0bce8780ULL, 0x0bce8838ULL, 0x0bce8840ULL,
+                        0x0bbf8070ULL, 0x0bbf8290ULL, 0x0bbedc98ULL,
+                        0x0b9b7504ULL, 0x0bce8567ULL,
+                    };
+                    Log::Line("uobject-probe: sweeping %zu allocator-cluster candidates...",
+                        sizeof(candidates)/sizeof(candidates[0]));
+                    for (std::uintptr_t rva : candidates) {
+                        std::uintptr_t chunksP = 0;
+                        std::uint32_t  n14    = 0;
+                        ue::SafeReadPtr(b + rva, chunksP);
+                        ue::SafeReadU32(b + rva + 0x14, n14);
+                        const bool ptrLooksOk = ue::LooksLikePointer(chunksP);
+                        const bool numLooksOk = (n14 >= 50000 && n14 <= 2000000);
+                        std::uintptr_t chunk0 = 0, item0 = 0;
+                        if (ptrLooksOk) ue::SafeReadPtr(chunksP, chunk0);
+                        if (chunk0 && ue::LooksLikePointer(chunk0)) ue::SafeReadPtr(chunk0, item0);
+                        const bool item0Vtable = item0 != 0
+                            && item0 >= b
+                            && item0 < (b + 0x0ccd0000ULL);
+                        Log::Line("  candidate 0x%08llx: chunks=0x%llx [ptrOk=%d]  num@+0x14=%u [numOk=%d]  *chunks[0]=0x%llx  **chunks[0]=0x%llx [vtable=%d]",
+                            static_cast<unsigned long long>(rva),
+                            static_cast<unsigned long long>(chunksP), ptrLooksOk ? 1 : 0,
+                            n14, numLooksOk ? 1 : 0,
+                            static_cast<unsigned long long>(chunk0),
+                            static_cast<unsigned long long>(item0),
+                            item0Vtable ? 1 : 0);
+                    }
+                }
+                const auto& og = Offsets().UObjectGlobals;
+                const std::uintptr_t base = ue::ModuleBase();
+                const std::uintptr_t objArr = base + og.kObjObjects;
+                std::uintptr_t chunksPtr = 0;
+                std::uint32_t  numObjs   = 0;
+                bool gotPtr = ue::SafeReadPtr(objArr, chunksPtr);
+                bool gotNum = ue::SafeReadU32(objArr + og.kObjObjects_Num, numObjs);
+                Log::Line("uobject-probe: FUObjectArray @ 0x%llx (RVA 0x%llx)  ptrRead=%d chunks=0x%llx  numRead=%d num=%u",
+                    static_cast<unsigned long long>(objArr),
+                    static_cast<unsigned long long>(og.kObjObjects),
+                    gotPtr ? 1 : 0,
+                    static_cast<unsigned long long>(chunksPtr),
+                    gotNum ? 1 : 0,
+                    numObjs);
+                // Hex-dump 128 bytes at FUObjectArray (so we see the full
+                // parent header + inner FFixedUObjectArray layout) and
+                // 64 bytes at *chunks for layout verification.
+                for (int row = 0; row < 8; ++row) {
+                    std::uintptr_t v0=0, v1=0;
+                    ue::SafeReadPtr(objArr + row*16,     v0);
+                    ue::SafeReadPtr(objArr + row*16 + 8, v1);
+                    Log::Line("  Parent+0x%02x: 0x%016llx  0x%016llx",
+                        row*16,
+                        static_cast<unsigned long long>(v0),
+                        static_cast<unsigned long long>(v1));
+                }
+                if (chunksPtr) {
+                    for (int row = 0; row < 4; ++row) {
+                        std::uintptr_t v0=0, v1=0;
+                        ue::SafeReadPtr(chunksPtr + row*16,     v0);
+                        ue::SafeReadPtr(chunksPtr + row*16 + 8, v1);
+                        Log::Line("  *chunks+0x%02x:     0x%016llx  0x%016llx",
+                            row*16,
+                            static_cast<unsigned long long>(v0),
+                            static_cast<unsigned long long>(v1));
+                    }
+                    std::uintptr_t chunk0=0;
+                    ue::SafeReadPtr(chunksPtr, chunk0);
+                    if (chunk0) {
+                        for (int row = 0; row < 2; ++row) {
+                            std::uintptr_t v0=0, v1=0;
+                            ue::SafeReadPtr(chunk0 + row*16,     v0);
+                            ue::SafeReadPtr(chunk0 + row*16 + 8, v1);
+                            Log::Line("  *chunk0+0x%02x:    0x%016llx  0x%016llx",
+                                row*16,
+                                static_cast<unsigned long long>(v0),
+                                static_cast<unsigned long long>(v1));
+                        }
+                    }
+                }
+
+                const std::uintptr_t poolAddr = base + og.kFNamePool;
+                const std::uintptr_t blocksAddr = poolAddr + og.kFNamePoolBlocks;
+                std::uintptr_t block0 = 0, block1 = 0;
+                ue::SafeReadPtr(blocksAddr, block0);
+                ue::SafeReadPtr(blocksAddr + 8, block1);
+                Log::Line("uobject-probe: FNamePool @ 0x%llx (RVA 0x%llx)  blocks[0]=0x%llx  blocks[1]=0x%llx",
+                    static_cast<unsigned long long>(poolAddr),
+                    static_cast<unsigned long long>(og.kFNamePool),
+                    static_cast<unsigned long long>(block0),
+                    static_cast<unsigned long long>(block1));
+                // FName 0 = "None" by convention. Dump first 32 bytes of
+                // block0 - if our pool guess is right we'll see something
+                // like [hdr_lo hdr_hi N o n e ...] at the start.
+                if (block0) {
+                    for (int row = 0; row < 2; ++row) {
+                        std::uintptr_t v0=0, v1=0;
+                        ue::SafeReadPtr(block0 + row*16,     v0);
+                        ue::SafeReadPtr(block0 + row*16 + 8, v1);
+                        Log::Line("  block0+0x%02x:   0x%016llx  0x%016llx",
+                            row*16,
+                            static_cast<unsigned long long>(v0),
+                            static_cast<unsigned long long>(v1));
+                    }
+                }
+                // Sweep alternate FNamePool candidates - which one has
+                // 'N','o','n','e' at the start of its block0?
+                {
+                    const std::uintptr_t fnp_candidates[] = {
+                        0x0b9afea8ULL,  // current scanner pick
+                        0x0bbc27d0ULL,  // referenced by FName helper 0xd30a90
+                        0x0bc04460ULL,  // ditto
+                        0x0bc04470ULL,  // referenced by FName helper 0xd30690
+                        0x0bcd48c0ULL,  // FName-init flag candidate
+                    };
+                    Log::Line("uobject-probe: sweeping FNamePool candidates...");
+                    for (std::uintptr_t rva : fnp_candidates) {
+                        std::uintptr_t b0=0;
+                        ue::SafeReadPtr(base + rva + 0x10, b0);
+                        unsigned char head[8] = {0};
+                        if (b0) {
+                            for (int i = 0; i < 8; ++i) {
+                                std::uint16_t x=0;
+                                if (!ue::SafeReadU16(b0 + i, x)) break;
+                                head[i] = static_cast<unsigned char>(x & 0xff);
+                            }
+                        }
+                        Log::Line("  fnp 0x%08llx: blocks[0]=0x%llx  raw=[%02x %02x %02x %02x %02x %02x %02x %02x]",
+                            static_cast<unsigned long long>(rva),
+                            static_cast<unsigned long long>(b0),
+                            head[0], head[1], head[2], head[3],
+                            head[4], head[5], head[6], head[7]);
+                    }
+                }
+
+                std::size_t iters = 0;
+                std::size_t withClass = 0;
+                std::size_t withName = 0;
+                std::size_t logged = 0;
+                std::unordered_set<std::string> seenClasses;
+                ue::ForEachUObject([&](std::uintptr_t obj) -> bool {
+                    ++iters;
+                    const std::string cls = ue::ClassName(obj);
+                    const std::string nm  = ue::ObjectName(obj);
+                    if (!cls.empty()) ++withClass;
+                    if (!nm.empty())  ++withName;
+                    // Log up to 30 *distinct* class names that resolve, so
+                    // the log shows what's actually walkable on this build.
+                    if (!cls.empty() && logged < 30 && !seenClasses.count(cls)) {
+                        seenClasses.insert(cls);
+                        Log::Line("uobject-probe[%zu @ iter %zu]: obj=0x%llx  class=\"%s\"  name=\"%s\"",
+                            logged, iters,
+                            static_cast<unsigned long long>(obj),
+                            cls.c_str(), nm.c_str());
+                        ++logged;
+                    }
+                    return iters >= 30000;  // sample up to first 30k objects
+                });
+                Log::Line("uobject-probe: iters=%zu  with-class=%zu  with-name=%zu  distinct-classes-logged=%zu",
+                    iters, withClass, withName, logged);
+            });
+#endif // ---- end GDK profile bisection probes ----
             g_hotkeys->AddHotkey(VK_SCROLL, []() {
                 Log::Line("=== HUD child-widget dump (press in gameplay, reticle on screen) ===");
                 CollectReticleWidgets();   // resolves getVis/getOpacity fns
@@ -2424,7 +2545,7 @@ namespace Subnautica2HeadTracking
             Log::Line("Inject modes: 0=ALL  1..11=single-caller  12=NONE  13=all-perframe(5-9)  14=all-tier1+2(1-4)");
 #endif
             Log::Line("Startup inject-mode = %d  (render-only filter: caller [2] RVA 0x%08llx -> aim decoupled)",
-                g_injectMode.load(), static_cast<unsigned long long>(kKnownCallerRvas[1]));
+                g_injectMode.load(), static_cast<unsigned long long>(Offsets().kKnownCallerRvas[1]));
 
             InstallCameraHook();
 

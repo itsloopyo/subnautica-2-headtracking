@@ -13,16 +13,24 @@ libs/
 *.suo
 *.log
 .headtracking-state.json
+scratch/
+/Subnautica2HeadTracking.marks.txt
+scripts/dump-running-exe.ps1
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
 *.tlog
 
 .claude/
+.codex/
 .lab/
 AGENTS.md
 CLAUDE.md
 NEXUS_MODS.md
+skills/
+.mcp/
+mcp.json
+mcp*.json
 
 __pycache__/
 *.pyc

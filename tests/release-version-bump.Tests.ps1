@@ -42,7 +42,7 @@ Describe "release.ps1 install.cmd version bump" {
     }
 
     It "leaves a non-version MOD_DLLS-style line untouched" {
-        $sample = "set `"MOD_DLLS=Subnautica2HeadTracking.asi HeadTracking.ini`"`r`n"
+        $sample = "set `"MOD_DLLS=dxgi.dll HeadTracking.ini`"`r`n"
         $bumped = $sample -replace $ps1BumpPattern, "`${1}9.9.9`${2}"
         $bumped | Should Be $sample
     }
