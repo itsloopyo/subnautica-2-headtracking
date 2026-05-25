@@ -18,6 +18,7 @@
 #include <psapi.h>
 
 #include "builds/build_registry.h"
+#include "crash_handler.h"
 #include "reticle_overlay.h"
 #include "ue_math.h"
 #include "ue_runtime.h"
@@ -1901,6 +1902,158 @@ namespace Subnautica2HeadTracking
             return DllDir(hModule) + L"Subnautica2HeadTracking.log";
         }
 
+        // Returns `s` with every (case-insensitive) occurrence of %USERPROFILE%
+        // replaced by the literal "<userprofile>". The user's profile folder
+        // usually contains their Windows username, which often equals their
+        // real name - redacting it keeps logs shareable without thinking. The
+        // lookup is cached on first call.
+        std::string RedactPath(const std::string& s)
+        {
+            static const std::string profile = []() {
+                char buf[MAX_PATH] = {};
+                const DWORD n = GetEnvironmentVariableA(
+                    "USERPROFILE", buf, static_cast<DWORD>(sizeof(buf)));
+                return (n > 0 && n < sizeof(buf))
+                    ? std::string(buf)
+                    : std::string();
+            }();
+            if (profile.empty()) return s;
+
+            std::string out;
+            out.reserve(s.size());
+            const size_t plen = profile.size();
+            size_t i = 0;
+            while (i < s.size()) {
+                if (i + plen <= s.size()
+                 && _strnicmp(s.data() + i, profile.data(),
+                              plen) == 0) {
+                    out.append("<userprofile>");
+                    i += plen;
+                } else {
+                    out.push_back(s[i]);
+                    ++i;
+                }
+            }
+            return out;
+        }
+
+        // Best-effort startup diagnostics. Anything that can be cheaply
+        // sampled at bootstrap and is useful for explaining a later crash
+        // belongs here - mod version, our DLL path, host EXE path, OS
+        // version, dxgi_orig.dll status, and a snapshot of every loaded
+        // module's base+size. The module snapshot is the load-bearing one:
+        // crash stacks are logged as module+RVA, and this listing is what
+        // lets us turn an unfamiliar module name in a report back into a
+        // real DLL on the user's machine.
+        void LogStartupDiagnostics(void* hModule)
+        {
+#if defined(SN2HT_MOD_VERSION) && defined(SN2HT_GIT_SHA)
+            Log::Line("mod-version: %s (%s)", SN2HT_MOD_VERSION, SN2HT_GIT_SHA);
+#elif defined(SN2HT_MOD_VERSION)
+            Log::Line("mod-version: %s", SN2HT_MOD_VERSION);
+#else
+            Log::Line("mod-version: <unknown - not defined at build time>");
+#endif
+            Log::Line("note: paths below have %%USERPROFILE%% replaced by <userprofile>; "
+                      "module names are verbatim");
+
+            {
+                wchar_t buf[MAX_PATH] = {};
+                GetModuleFileNameW(static_cast<HMODULE>(hModule), buf, MAX_PATH);
+                char narrow[MAX_PATH] = {};
+                WideCharToMultiByte(CP_UTF8, 0, buf, -1, narrow,
+                                    static_cast<int>(sizeof(narrow)),
+                                    nullptr, nullptr);
+                Log::Line("mod-dll: %s", RedactPath(narrow).c_str());
+            }
+
+            {
+                wchar_t buf[MAX_PATH] = {};
+                GetModuleFileNameW(nullptr, buf, MAX_PATH);
+                char narrow[MAX_PATH] = {};
+                WideCharToMultiByte(CP_UTF8, 0, buf, -1, narrow,
+                                    static_cast<int>(sizeof(narrow)),
+                                    nullptr, nullptr);
+                Log::Line("host-exe: %s", RedactPath(narrow).c_str());
+            }
+
+            // Without dxgi_orig.dll the proxy forwarders fail at load - if
+            // we got this far it MUST exist, but log its presence anyway so
+            // a future failure mode (forwarder partially resolved, wrong
+            // version) is visible. Redact even though System32 paths don't
+            // normally contain the user profile - cheap insurance.
+            {
+                HMODULE dxgiOrig = GetModuleHandleW(L"dxgi_orig.dll");
+                if (dxgiOrig) {
+                    wchar_t buf[MAX_PATH] = {};
+                    GetModuleFileNameW(dxgiOrig, buf, MAX_PATH);
+                    char narrow[MAX_PATH] = {};
+                    WideCharToMultiByte(CP_UTF8, 0, buf, -1, narrow,
+                                        static_cast<int>(sizeof(narrow)),
+                                        nullptr, nullptr);
+                    Log::Line("dxgi_orig.dll: loaded @ 0x%016llx  %s",
+                        reinterpret_cast<unsigned long long>(dxgiOrig),
+                        RedactPath(narrow).c_str());
+                } else {
+                    Log::Line("dxgi_orig.dll: NOT LOADED (proxy forwarders should have required it)");
+                }
+            }
+
+            // OS version via RtlGetVersion - GetVersionExW lies on Win8+
+            // unless the EXE has a compatibility manifest, which the game
+            // controls, not us. RtlGetVersion bypasses the shim entirely.
+            {
+                using RtlGetVersionFn = LONG(WINAPI*)(PRTL_OSVERSIONINFOW);
+                HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+                auto fn = ntdll ? reinterpret_cast<RtlGetVersionFn>(
+                    reinterpret_cast<void*>(GetProcAddress(ntdll, "RtlGetVersion")))
+                    : nullptr;
+                if (fn) {
+                    RTL_OSVERSIONINFOW v{};
+                    v.dwOSVersionInfoSize = static_cast<ULONG>(sizeof(v));
+                    if (fn(&v) == 0) {
+                        Log::Line("os: Windows %lu.%lu build %lu",
+                            v.dwMajorVersion, v.dwMinorVersion, v.dwBuildNumber);
+                    }
+                }
+            }
+
+            // Module snapshot. Enumerates everything currently in the
+            // process so a future crash log's module+RVA frames can be
+            // matched back to real DLLs. EnumProcessModules can race with
+            // LoadLibrary on other threads; tolerate a partial list by
+            // sizing the array generously and logging whatever fits.
+            {
+                constexpr DWORD kMaxMods = 512;
+                HMODULE mods[kMaxMods];
+                DWORD needed = 0;
+                if (EnumProcessModules(GetCurrentProcess(), mods,
+                                       static_cast<DWORD>(sizeof(mods)),
+                                       &needed)) {
+                    const DWORD reported =
+                        static_cast<DWORD>(needed / sizeof(HMODULE));
+                    const DWORD count = (reported < kMaxMods) ? reported : kMaxMods;
+                    Log::Line("modules: %lu loaded", count);
+                    for (DWORD i = 0; i < count; ++i) {
+                        MODULEINFO mi{};
+                        if (!GetModuleInformation(GetCurrentProcess(), mods[i],
+                                                  &mi,
+                                                  static_cast<DWORD>(sizeof(mi)))) {
+                            continue;
+                        }
+                        char name[MAX_PATH] = {};
+                        GetModuleBaseNameA(GetCurrentProcess(), mods[i],
+                                           name,
+                                           static_cast<DWORD>(sizeof(name)));
+                        Log::Line("  %-40s  base=0x%016llx  size=0x%08lx",
+                            name,
+                            reinterpret_cast<unsigned long long>(mi.lpBaseOfDll),
+                            mi.SizeOfImage);
+                    }
+                }
+            }
+        }
+
         // Narrow sibling of DllDir for the ANSI IniReader (GetPrivateProfile*A).
         std::string DllDirNarrow(void* hModule)
         {
@@ -2043,6 +2196,12 @@ namespace Subnautica2HeadTracking
             Log::Line("Subnautica 2 Head Tracking - bootstrap");
             Log::Line("Process: PID=%lu", GetCurrentProcessId());
 
+            // Crash handler before anything else - if the build-check or
+            // hook install itself faults, we want a stack in the log rather
+            // than a silent process death.
+            Crash::Install();
+            LogStartupDiagnostics(module);
+
             const auto matchResult = builds::SelectProfile(GetModuleHandleW(nullptr));
             if (matchResult != builds::MatchResult::Matched) {
                 Log::Line("============================================================");
@@ -2072,6 +2231,7 @@ namespace Subnautica2HeadTracking
                 Log::Line(" To avoid crashing your session, head tracking is staying");
                 Log::Line(" OFF and the game will run vanilla.");
                 Log::Line("============================================================");
+                Log::Line("===== bootstrap exited (build mismatch, mod dormant) =====");
                 return 0;  // no hooks, no UObject walks - game runs vanilla
             }
             Log::Line("build-check: PASS - matched profile %s, arming",
@@ -2556,6 +2716,7 @@ namespace Subnautica2HeadTracking
             // game's process to find a usable D3D12 device.
 
             Log::Line("Awaiting OpenTrack packets on UDP 4242");
+            Log::Line("===== bootstrap complete =====");
             return 0;
         }
     }
@@ -2576,5 +2737,16 @@ namespace Subnautica2HeadTracking
         g_hotkeys.reset();
         Log::Line("Shutdown");
         Log::Close();
+    }
+
+    void EmergencyShutdown()
+    {
+        // Process is exiting. The kernel terminated every other thread
+        // without unwinding their stacks, so any mutex they held is still
+        // "locked" - acquiring g_mutex via Log::Line/Log::Close would
+        // deadlock, and joining threads in g_receiver/g_hotkeys would too.
+        // Use the lock-free EmergencyLine, then return and let the OS
+        // reclaim everything. No destructors, no joins, no unhook.
+        Log::EmergencyLine("===== process exiting (DLL_PROCESS_DETACH, no cleanup) =====");
     }
 }

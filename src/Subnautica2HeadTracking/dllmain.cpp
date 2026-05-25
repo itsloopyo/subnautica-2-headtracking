@@ -32,13 +32,24 @@
 #pragma comment(linker, "/export:SetAppCompatStringPointer=dxgi_orig.SetAppCompatStringPointer")
 #pragma comment(linker, "/export:UpdateHMDEmulationStatus=dxgi_orig.UpdateHMDEmulationStatus")
 
-BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
+BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID lpReserved)
 {
     if (reason == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(hModule);
         Subnautica2HeadTracking::Initialize(hModule);
     } else if (reason == DLL_PROCESS_DETACH) {
-        Subnautica2HeadTracking::Shutdown();
+        // lpReserved is NULL on a manual FreeLibrary; non-NULL when the
+        // process is exiting. On process exit the kernel terminates all
+        // other threads without unwinding their stacks, leaving any mutex
+        // they held in a "locked" state - so our full Shutdown (which
+        // joins worker threads and acquires log/hook locks) would deadlock
+        // or worse. The OS reclaims handles, sockets, and memory on exit,
+        // so the only thing worth doing on that path is a final log line.
+        if (lpReserved == nullptr) {
+            Subnautica2HeadTracking::Shutdown();
+        } else {
+            Subnautica2HeadTracking::EmergencyShutdown();
+        }
     }
     return TRUE;
 }
