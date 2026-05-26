@@ -81,6 +81,20 @@ namespace Subnautica2HeadTracking
         std::unique_ptr<cameraunlock::input::HotkeyPoller> g_hotkeys;
         std::atomic<bool> g_trackingEnabled{true};
 
+        // GetTickCount64() captured at the very start of BootstrapThread.
+        // Drives the "danger zone" heartbeat cadence - tighter logging in
+        // the first 30s post-boot, where GPU crashes on level-load happen.
+        std::uint64_t g_bootstrapTickStart = 0;
+
+        // Set true via [Debug] DisableMaskComp=true in HeadTracking.ini.
+        // Strictly a diagnostic switch: disables the mask compensation
+        // subsystem (the head-rotation cancellation that's written into UE
+        // SceneComponents) without disabling head tracking itself. Lets a
+        // user with a hooking conflict get a working log without our most
+        // invasive runtime behaviour. Default false; not surfaced in
+        // standard config docs.
+        std::atomic<bool> g_disableMaskComp{false};
+
         // True while both Ctrl (either side) and Shift (either side) are held.
         // GetAsyncKeyState(VK_CONTROL/VK_SHIFT) reports the merged left+right
         // state, so this covers all four modifier keys. The chord letter's own
@@ -482,6 +496,7 @@ namespace Subnautica2HeadTracking
                                         const FVector& cameraPos,
                                         const FVector& posOffset,
                                         const FQuat4d& H) {
+            if (g_disableMaskComp.load(std::memory_order_relaxed)) return;
             if (!g_maskCompEnabled.load(std::memory_order_relaxed)) return;
             // H is the world-space rotation the hook actually applied to the
             // view (computed by the caller from base/final quats, so it is
@@ -1680,6 +1695,14 @@ namespace Subnautica2HeadTracking
             if (g_hookCallCount.load(std::memory_order_relaxed) > 500
                 && !s_overlayTried.exchange(true))
             {
+                // Log before the call so if kiero/D3D12 hooking crashes
+                // inside cameraunlock's DX12Overlay, we have a clear "we
+                // were about to install" marker. The OK/FAILED line fires
+                // after install returns.
+                Log::Line("reticle-overlay: starting D3D12 install "
+                          "(hookCount=%llu)",
+                    static_cast<unsigned long long>(
+                        g_hookCallCount.load(std::memory_order_relaxed)));
                 ReticleOverlay::Install();
             }
 
@@ -1736,18 +1759,32 @@ namespace Subnautica2HeadTracking
             }
 
             // Heartbeat: fires even when no UDP data arrives, so "hook never
-            // called" is distinguishable from "tracking data missing".
-            if (n == 1 || (n % 3000) == 0) {
-                float hy = 0.0f, hp = 0.0f, hr = 0.0f;
-                const bool haveData = g_receiver && g_receiver->GetRotation(hy, hp, hr);
-                Log::Line("heartbeat hook=%llu  retRVA=0x%08llx  enabled=%s  udpData=%s  raw=(Y=%.2f P=%.2f R=%.2f)  yawMode=%s  injectMode=%d",
-                    static_cast<unsigned long long>(n),
-                    static_cast<unsigned long long>(retRva),
-                    g_trackingEnabled.load() ? "ON" : "OFF",
-                    haveData ? "YES" : "NO",
-                    hy, hp, hr,
-                    g_worldSpaceYaw.load() ? "world" : "local",
-                    mode);
+            // called" is distinguishable from "tracking data missing". Time-
+            // gated rather than count-gated - the original `n % 3000` left
+            // ~10s of silence between heartbeats, which is exactly the window
+            // a GPU crash on level-load lands in. Tighter cadence (every 2s)
+            // for the first 30s after bootstrap, then back off to every 30s
+            // so a long session doesn't bloat the log.
+            {
+                static std::atomic<std::uint64_t> s_lastHeartbeatTick{0};
+                const std::uint64_t now = GetTickCount64();
+                const std::uint64_t last = s_lastHeartbeatTick.load(
+                    std::memory_order_relaxed);
+                const bool inDangerZone = (now - g_bootstrapTickStart) < 30000;
+                const std::uint64_t interval = inDangerZone ? 2000 : 30000;
+                if (n == 1 || (now - last) >= interval) {
+                    s_lastHeartbeatTick.store(now, std::memory_order_relaxed);
+                    float hy = 0.0f, hp = 0.0f, hr = 0.0f;
+                    const bool haveData = g_receiver && g_receiver->GetRotation(hy, hp, hr);
+                    Log::Line("heartbeat hook=%llu  retRVA=0x%08llx  enabled=%s  udpData=%s  raw=(Y=%.2f P=%.2f R=%.2f)  yawMode=%s  injectMode=%d",
+                        static_cast<unsigned long long>(n),
+                        static_cast<unsigned long long>(retRva),
+                        g_trackingEnabled.load() ? "ON" : "OFF",
+                        haveData ? "YES" : "NO",
+                        hy, hp, hr,
+                        g_worldSpaceYaw.load() ? "world" : "local",
+                        mode);
+                }
             }
 
             // Suppress tracking outside gameplay (main menu, PDA, pause): leave
@@ -2054,6 +2091,180 @@ namespace Subnautica2HeadTracking
             }
         }
 
+        // Case-insensitive substring search.
+        bool ContainsCI(const std::string& hay, const char* needle)
+        {
+            if (!needle || !*needle) return false;
+            const size_t nlen = std::strlen(needle);
+            if (hay.size() < nlen) return false;
+            for (size_t i = 0; i + nlen <= hay.size(); ++i) {
+                if (_strnicmp(hay.data() + i, needle, nlen) == 0) return true;
+            }
+            return false;
+        }
+
+        // Scan the game's user-settings INI files for any line mentioning
+        // DLSS / Streamline / Reflex / Frame Generation. The exact keys vary
+        // by Streamline plugin version, so we match on substrings of common
+        // names rather than hardcoding key paths. UE5 saves these under
+        // %LOCALAPPDATA%\Subnautica2\Saved\Config\Windows\, but a few prior
+        // UE conventions (WindowsNoEditor/WindowsClient) exist - try all.
+        void LogGameUserSettings()
+        {
+            char appdata[MAX_PATH] = {};
+            const DWORD n = GetEnvironmentVariableA(
+                "LOCALAPPDATA", appdata,
+                static_cast<DWORD>(sizeof(appdata)));
+            if (n == 0 || n >= sizeof(appdata)) {
+                Log::Line("game-settings: %%LOCALAPPDATA%% not resolvable, skipping scan");
+                return;
+            }
+
+            static const char* kSubdirs[] = {
+                "\\Subnautica2\\Saved\\Config\\Windows\\",
+                "\\Subnautica2\\Saved\\Config\\WindowsNoEditor\\",
+                "\\Subnautica2\\Saved\\Config\\WindowsClient\\",
+            };
+            static const char* kFiles[] = {
+                "GameUserSettings.ini",
+                "Engine.ini",
+                "Game.ini",
+            };
+            static const char* kKeywords[] = {
+                "dlss", "streamline", "reflex",
+                "framegen", "frame_gen", "frame gen",
+                "ngx", "resolutionscale",
+                "frameratelimit", "vsync",
+                "resolutionx", "resolutiony", "fullscreenmode",
+            };
+
+            bool anyFound = false;
+            for (const char* sub : kSubdirs) {
+                for (const char* file : kFiles) {
+                    char full[MAX_PATH * 2] = {};
+                    std::snprintf(full, sizeof(full), "%s%s%s",
+                                  appdata, sub, file);
+                    FILE* f = nullptr;
+                    fopen_s(&f, full, "r");
+                    if (!f) continue;
+                    anyFound = true;
+                    Log::Line("game-settings: scanning %s", full);
+                    char line[1024];
+                    std::string section;
+                    int matched = 0;
+                    while (std::fgets(line, sizeof(line), f)) {
+                        // Strip trailing newline.
+                        size_t llen = std::strlen(line);
+                        while (llen > 0 &&
+                               (line[llen-1] == '\n' || line[llen-1] == '\r')) {
+                            line[--llen] = 0;
+                        }
+                        if (llen == 0) continue;
+                        if (line[0] == '[') {
+                            section = line;
+                            continue;
+                        }
+                        std::string s(line);
+                        bool hit = false;
+                        for (const char* kw : kKeywords) {
+                            if (ContainsCI(s, kw)
+                             || ContainsCI(section, kw)) {
+                                hit = true;
+                                break;
+                            }
+                        }
+                        if (hit) {
+                            Log::Line("  %s | %s",
+                                      section.empty() ? "(root)" : section.c_str(),
+                                      line);
+                            if (++matched > 40) {
+                                Log::Line("  (>40 matches; truncating)");
+                                break;
+                            }
+                        }
+                    }
+                    std::fclose(f);
+                    if (matched == 0) {
+                        Log::Line("  (no DLSS/Streamline/Reflex keys found)");
+                    }
+                }
+            }
+            if (!anyFound) {
+                Log::Line("game-settings: no UE config files found under "
+                          "%%LOCALAPPDATA%%\\Subnautica2\\Saved\\Config\\");
+            }
+        }
+
+        // Deferred snapshot for state that doesn't exist yet at bootstrap.
+        // Streamline (sl.interposer, sl.dlss*, sl.reflex, the obfuscated
+        // 1B0_*.dll plugins) loads later during UE engine init, so we miss
+        // it on the bootstrap module dump. Sleep a few seconds, then dump
+        // just the modules whose names match Streamline / NVIDIA NGX shapes.
+        DWORD WINAPI DeferredDiagThread(LPVOID)
+        {
+            Sleep(8000);  // give UE engine init + StreamlineCore time to load
+
+            constexpr DWORD kMaxMods = 1024;
+            HMODULE mods[kMaxMods];
+            DWORD needed = 0;
+            if (!EnumProcessModules(GetCurrentProcess(), mods,
+                                    static_cast<DWORD>(sizeof(mods)),
+                                    &needed)) {
+                Log::Line("deferred-diag: EnumProcessModules failed (err=%lu)",
+                          GetLastError());
+                return 0;
+            }
+            const DWORD count = static_cast<DWORD>(needed / sizeof(HMODULE));
+            Log::Line("deferred-diag: post-init module scan (%lu modules now loaded)",
+                      count);
+
+            int slCount = 0;
+            for (DWORD i = 0; i < count && i < kMaxMods; ++i) {
+                char name[MAX_PATH] = {};
+                if (!GetModuleBaseNameA(GetCurrentProcess(), mods[i],
+                                        name,
+                                        static_cast<DWORD>(sizeof(name)))) {
+                    continue;
+                }
+                // Match against Streamline / NVIDIA injector naming.
+                const bool isStreamline =
+                       _strnicmp(name, "sl.", 3) == 0
+                    || _strnicmp(name, "nvngx", 5) == 0
+                    || _strnicmp(name, "nvapi", 5) == 0
+                    || std::strstr(name, "_E658") != nullptr  // 1B0_E658703-style
+                    || std::strstr(name, "Streamline") != nullptr;
+                if (!isStreamline) continue;
+                ++slCount;
+                MODULEINFO mi{};
+                if (!GetModuleInformation(GetCurrentProcess(), mods[i],
+                                          &mi,
+                                          static_cast<DWORD>(sizeof(mi)))) {
+                    Log::Line("  sl/nv: %s  (GetModuleInformation failed)", name);
+                    continue;
+                }
+                wchar_t fullW[MAX_PATH] = {};
+                GetModuleFileNameW(mods[i], fullW, MAX_PATH);
+                char fullA[MAX_PATH] = {};
+                WideCharToMultiByte(CP_UTF8, 0, fullW, -1, fullA,
+                                    static_cast<int>(sizeof(fullA)),
+                                    nullptr, nullptr);
+                Log::Line("  sl/nv: %-36s base=0x%016llx size=0x%08lx  %s",
+                    name,
+                    reinterpret_cast<unsigned long long>(mi.lpBaseOfDll),
+                    mi.SizeOfImage,
+                    RedactPath(fullA).c_str());
+            }
+            if (slCount == 0) {
+                Log::Line("  (no Streamline / NVIDIA injector modules found - "
+                          "DLSS/Frame-Gen probably inactive)");
+            }
+
+            // Re-scan settings INI: the game may have written it after our
+            // bootstrap pass (first-launch settings save).
+            LogGameUserSettings();
+            return 0;
+        }
+
         // Narrow sibling of DllDir for the ANSI IniReader (GetPrivateProfile*A).
         std::string DllDirNarrow(void* hModule)
         {
@@ -2190,6 +2401,7 @@ namespace Subnautica2HeadTracking
 
         DWORD WINAPI BootstrapThread(LPVOID module)
         {
+            g_bootstrapTickStart = GetTickCount64();
             g_marksFilePath = DllDir(module) + L"Subnautica2HeadTracking.marks.txt";
             const auto logPath = LogPathNextToDll(module);
             Log::Open(logPath);
@@ -2201,6 +2413,13 @@ namespace Subnautica2HeadTracking
             // than a silent process death.
             Crash::Install();
             LogStartupDiagnostics(module);
+            LogGameUserSettings();
+
+            // Kick off the deferred snapshot thread early: it sleeps ~8s
+            // and then dumps Streamline / NVIDIA modules that load during
+            // engine init. Spawned here so it's running even if we exit
+            // early via the build-check mismatch path.
+            CreateThread(nullptr, 0, DeferredDiagThread, nullptr, 0, nullptr);
 
             const auto matchResult = builds::SelectProfile(GetModuleHandleW(nullptr));
             if (matchResult != builds::MatchResult::Matched) {
@@ -2252,10 +2471,19 @@ namespace Subnautica2HeadTracking
                     yawModeKey = ini.ReadHex("Hotkeys", "ToggleYawMode", 0x22);
                     g_tooltipMoveOn.store(ini.ReadBool("Tooltip", "FollowReticle", true));
                     g_tooltipFollowScale.store(ini.ReadFloat("Tooltip", "FollowScale", 1.0f));
-                    Log::Line("config: WorldSpaceYaw=%s  ToggleYawMode=0x%02x  TooltipFollow=%s scale=%.2f",
+                    // Debug-only escape hatch. Documented intent: when a
+                    // user hits a hooking conflict with another DXGI/D3D12
+                    // interposer (Streamline, RTSS overlays, ReShade), let
+                    // them disable our most invasive runtime behaviour
+                    // without losing head tracking entirely. Not surfaced
+                    // in the standard config docs.
+                    g_disableMaskComp.store(
+                        ini.ReadBool("Debug", "DisableMaskComp", false));
+                    Log::Line("config: WorldSpaceYaw=%s  ToggleYawMode=0x%02x  TooltipFollow=%s scale=%.2f  DisableMaskComp=%s",
                         g_worldSpaceYaw.load() ? "true" : "false", yawModeKey,
                         g_tooltipMoveOn.load() ? "true" : "false",
-                        g_tooltipFollowScale.load());
+                        g_tooltipFollowScale.load(),
+                        g_disableMaskComp.load() ? "true" : "false");
                 } else {
                     Log::Line("config: no HeadTracking.ini next to DLL; "
                               "WorldSpaceYaw=true, ToggleYawMode=0x22 (defaults)");
