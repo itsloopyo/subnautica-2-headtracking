@@ -2091,18 +2091,6 @@ namespace Subnautica2HeadTracking
             }
         }
 
-        // Case-insensitive substring search.
-        bool ContainsCI(const std::string& hay, const char* needle)
-        {
-            if (!needle || !*needle) return false;
-            const size_t nlen = std::strlen(needle);
-            if (hay.size() < nlen) return false;
-            for (size_t i = 0; i + nlen <= hay.size(); ++i) {
-                if (_strnicmp(hay.data() + i, needle, nlen) == 0) return true;
-            }
-            return false;
-        }
-
         // Scan the game's user-settings INI files for any line mentioning
         // DLSS / Streamline / Reflex / Frame Generation. The exact keys vary
         // by Streamline plugin version, so we match on substrings of common
