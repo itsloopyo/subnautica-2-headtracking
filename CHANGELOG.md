@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.2.1] - 2026-05-28
+
+### Other
+
+- Add crash diagnostics: unhandled-exception filter + startup snapshot
+- Add Streamline/DLSS diagnostics + DisableMaskComp debug knob
+- Fix CI build: remove duplicate ContainsCI definition
+- find-game: escape `&` in GAME_DISPLAY_NAME so echo doesn't split
+- templates: add uninstall.ps1; data: add Deus Ex Mankind Divided
+- powershell: add NightlyRelease module for Patreon-gated nightly builds
+- protocol: disable SIO_UDP_CONNRESET and add one-shot receiver diagnostics; powershell: write nightly manifest.json without UTF-8 BOM; data: add Mixtape
+- powershell: stop redirecting git stderr in Update-CameraUnlockCoreToRemoteTip
+- Add release nightly dispatch and publisher shim
+- powershell: publish dev builds as GitHub pre-releases
+- protocol: disable SIO_UDP_CONNRESET and add one-shot receiver diagnostics
+- data: add Mixtape
+- powershell: stop redirecting git stderr in Update-CameraUnlockCoreToRemoteTip
+- powershell: run gh under Continue so its stderr doesn't abort the dev-release publish
+- Drive reticle projection from live engine FOV
+
 ## [0.2.0] - 2026-05-24
 
 ### Other
