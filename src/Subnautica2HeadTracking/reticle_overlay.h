@@ -16,6 +16,15 @@ namespace Subnautica2HeadTracking::ReticleOverlay
     // i.e. main menu, PDA, pause, where the player controller shows the cursor).
     void UpdateAim(double qx, double qy, double qz, double qw, bool active);
 
+    // Push the live horizontal FOV (degrees) read from the engine's
+    // FMinimalViewInfo each renderer-caller frame. This is the aspect-independent
+    // FOV scalar (treated as the 16:9-reference horizontal FOV; the overlay
+    // re-derives per-aspect Hor+ scaling). The overlay projects the clean-aim
+    // crosshair with this instead of a hardcoded FOV, so the reticle stays
+    // correct when the player changes the FOV slider or zooms. Values outside a
+    // sane range are ignored by the overlay.
+    void SetFovDegrees(float fovDegrees);
+
     // Refresh only the active flag without touching the cached qrel. Called
     // by the GPV hook on non-renderer callers (caller-gate rejects them) so
     // the reticle keeps drawing across frames even when the renderer caller

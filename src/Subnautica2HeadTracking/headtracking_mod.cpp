@@ -1866,6 +1866,35 @@ namespace Subnautica2HeadTracking
             ReticleOverlay::UpdateAim(qrel.X, qrel.Y, qrel.Z, qrel.W,
                                       inGameplay);
 
+            // Feed the overlay the engine's live FOV so the reticle projection
+            // tracks the player's FOV slider instead of a hardcoded value. On
+            // the render path, GPV's out-params are the Location/Rotation fields
+            // of the FMinimalViewInfo this caller is assembling (confirmed in
+            // Ghidra, FUN_1441718b0): Rotation = Location + kRotationStride, and
+            // FOV sits at Location + kFovOffset - written just before the GPV
+            // vfn call, so it's already populated here. The stride check rejects
+            // any caller whose out-params aren't one contiguous FMinimalViewInfo.
+            {
+                const auto locA = reinterpret_cast<std::uintptr_t>(outLocation);
+                const auto rotA = reinterpret_cast<std::uintptr_t>(outRotation);
+                if (rotA - locA == Offsets().MinimalViewInfoLayout.kRotationStride) {
+                    std::uint32_t fovBits = 0;
+                    if (ue::SafeReadU32(locA + Offsets().MinimalViewInfoLayout.kFovOffset,
+                                        fovBits)) {
+                        float fovDeg = 0.0f;
+                        std::memcpy(&fovDeg, &fovBits, sizeof(fovDeg));
+                        ReticleOverlay::SetFovDegrees(fovDeg);
+                        static std::atomic<bool> s_fovLogged{false};
+                        if (!s_fovLogged.exchange(true)) {
+                            Log::Line("reticle FOV: live FMinimalViewInfo.FOV = "
+                                      "%.2f deg (read at outLocation+0x%zx)",
+                                      fovDeg,
+                                      Offsets().MinimalViewInfoLayout.kFovOffset);
+                        }
+                    }
+                }
+            }
+
             // Drive the mask isolator with the same tracker delta. When a
             // slot is selected, head movement visibly rotates exactly that
             // mesh - lets us identify which slot is the helmet/mask.

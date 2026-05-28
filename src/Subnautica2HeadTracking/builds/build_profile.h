@@ -96,6 +96,16 @@ namespace Subnautica2HeadTracking
             std::uintptr_t kCameraMountComponent;
         } VTables;
 
+        // FMinimalViewInfo field offsets (UE5.6.1 LWC ABI). The render caller
+        // (FMinimalViewInfo builder) hands GPV pointers into this struct, so
+        // the hook reads the live FOV from outLocation + kFovOffset. kRotationStride
+        // is the Location->Rotation gap, used to sanity-check that the out-params
+        // really are contiguous fields of one FMinimalViewInfo before reading FOV.
+        struct {
+            std::size_t kFovOffset;
+            std::size_t kRotationStride;
+        } MinimalViewInfoLayout;
+
         // Hook target: APlayerController::GetPlayerViewPoint.
         std::uintptr_t kGetPlayerViewPointRva;
 

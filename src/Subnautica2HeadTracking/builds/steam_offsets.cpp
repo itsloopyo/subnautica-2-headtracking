@@ -80,6 +80,13 @@ namespace Subnautica2HeadTracking::builds
                 /* kSkeletalMeshComponent */ 0x0a2e2a48ULL,
                 /* kCameraMountComponent  */ 0x0aeedfa8ULL,
             },
+            // Confirmed in Ghidra: FUN_1441718b0 (the FMinimalViewInfo builder)
+            // copies Location@+0x00, Rotation@+0x18, FOV@+0x30 from the camera
+            // cache, and writes FOV before the GPV vfn call on the render path.
+            /* MinimalViewInfoLayout */ {
+                /* kFovOffset      */ 0x30,
+                /* kRotationStride */ 0x18,
+            },
             /* kGetPlayerViewPointRva */ 0x043ed6f0ULL,
             /* kKnownCallerRvas */ {{
                 0x06329c08ULL,  // 1: ~22/frame, dominant

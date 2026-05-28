@@ -111,6 +111,13 @@ namespace Subnautica2HeadTracking::builds
                 /* kSkeletalMeshComponent */ 0,
                 /* kCameraMountComponent  */ 0,
             },
+            // Same UE5.6.1 FMinimalViewInfo ABI as Steam. The GDK render caller
+            // (FUN_143f07260) runs the identical 0x7f8-then-0x828 double-vfn
+            // sequence, so it writes FOV@+0x30 before the GPV call too.
+            /* MinimalViewInfoLayout */ {
+                /* kFovOffset      */ 0x30,
+                /* kRotationStride */ 0x18,
+            },
             // Discovered via rederive_all.py against the rebased dump on
             // 2026-05-24.
             /* kGetPlayerViewPointRva */ 0x04183250ULL,
