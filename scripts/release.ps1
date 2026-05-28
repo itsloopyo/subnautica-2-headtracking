@@ -10,8 +10,13 @@ $projectDir = Split-Path -Parent $PSScriptRoot
 Import-Module (Join-Path $projectDir "cameraunlock-core/powershell/ReleaseWorkflow.psm1") -Force
 
 if ([string]::IsNullOrWhiteSpace($Version)) {
-    Write-Error "Usage: pixi run release <major|minor|patch|X.Y.Z>"
+    Write-Error "Usage: pixi run release <major|minor|patch|nightly|X.Y.Z>"
     exit 1
+}
+
+if ($Version -eq 'nightly') {
+    & (Join-Path $PSScriptRoot 'release-nightly.ps1')
+    exit $LASTEXITCODE
 }
 
 $pixiPath      = Join-Path $projectDir "pixi.toml"
