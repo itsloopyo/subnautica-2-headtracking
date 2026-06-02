@@ -24,7 +24,105 @@
 
 namespace Subnautica2HeadTracking::builds
 {
+    extern const BuildProfile kGdkProfile_20260602;
     extern const BuildProfile kGdkProfile_20260524;
+
+    // ---- Xbox/GDK package 0.11.5506.0 (PE TS 0x0bf5cd18) ----
+    // RVAs derived from a runtime dump (scripts/dump-running-exe.ps1) fed to
+    // scripts/derive_rvas.py + derive_globals.py (deterministic PE signature
+    // scan - see steam_offsets.cpp kSteamProfile_20260601 for the method).
+    const BuildProfile kGdkProfile_20260602 = {
+        /* Name        */ "gdk-wingdk-20260602",
+        /* Fingerprint */ { 0x0bf5cd18u, 0x0ccd6000u, 0x0c72fe83u },
+        /* Offsets     */ {
+            /* ZRegInfo */ {
+                /* kAUWEPlayerCameraManager        */ 0,
+                /* kUWEPlayerCameraManagerSettings */ 0,
+                /* kAPlayerCameraManager           */ 0,
+                /* kMinimalViewInfo                */ 0,
+                /* kUWECameraPackage               */ 0,
+            },
+            /* ZConstruct */ {
+                /* kAUWEPlayerCameraManager */ 0,
+                /* kAPlayerCameraManager    */ 0,
+                /* kMinimalViewInfo         */ 0,
+                /* kUWECameraPackage        */ 0,
+            },
+            /* UECodeGen */ {
+                /* kConstructUClass_thunk */ 0,
+                /* kConstructUClass       */ 0,
+                /* kConstructUPackage     */ 0,
+            },
+            /* UWEPlayerCameraManager */ {
+                /* kInstanceSize_Bytes */ 0,
+                /* kClassFlags         */ 0,
+                /* kStaticsRva         */ 0,
+            },
+            /* USceneComponentLayout */ {
+                /* kComponentToWorldRotation    */ 0x1f0,
+                /* kComponentToWorldTranslation */ 0x210,
+                /* kComponentToWorldScale       */ 0x230,
+            },
+            /* PawnSlots */ {
+                /* kCapsule              */ 0x340,
+                /* kCapsuleAlias         */ 0x1c0,
+                /* kPrimaryMesh          */ 0x330,
+                /* kMeshArrayBegin       */ 0x7c8,
+                /* kMeshArrayStride      */ 0x008,
+                /* kMeshArrayCount       */ 6,
+                /* kCameraMountComponent */ 0x858,
+            },
+            /* PlayerController */ {
+                /* kShowMouseCursorOffset */ 0x554,
+                /* kShowMouseCursorMask   */ 0x1u,
+                /* kPawn                  */ 0x2f0,
+                /* kPlayerCameraManager   */ 0x368,
+            },
+            // ObjObjects: allocator sig unique hit (fn 0x015031c0), the
+            // `mov [rip],rax` @ fn+0x18e. FNamePool: both decoder variants
+            // (0x0128ffc0 / 0x01290030) agree, pool - init_flag == 0x267.
+            /* UObjectGlobals */ {
+                /* kObjObjects       */ 0x0bcf0c00ULL,
+                /* kObjObjects_Num   */ 0x14,
+                /* kFUObjectItemSize */ 0x18,
+                /* kChunkNumElems    */ 0x10000,
+                /* kFNamePool        */ 0x0bc0c980ULL,
+                /* kFNamePoolBlocks  */ 0x10,
+                /* kClassPrivate     */ 0x10,
+                /* kNamePrivate      */ 0x18,
+                /* kOuterPrivate     */ 0x20,
+            },
+            /* VTables */ {
+                /* kCapsuleComponent      */ 0,
+                /* kSkeletalMeshComponent */ 0,
+                /* kCameraMountComponent  */ 0,
+            },
+            /* MinimalViewInfoLayout */ {
+                /* kFovOffset      */ 0x30,
+                /* kRotationStride */ 0x18,
+            },
+            // GPV: 32-byte prologue signature, unique hit (+0xb0 from 20260524).
+            /* kGetPlayerViewPointRva */ 0x04183300ULL,
+            /* kKnownCallerRvas */ {{
+                0,
+                // Render caller: fn 0x03f07330's call [pcm+0x828] retRVA.
+                // Confirmed three ways: structural double-vfn match (2nd of 4
+                // candidates, PCM[+0x368] deref), +0xd0 from the 20260524
+                // render fn 0x03f07260, and that old fn's 32-byte prologue
+                // signature hits the new dump exactly once at 0x03f07330.
+                0x03f07577ULL,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            }},
+        },
+    };
 
     // ---- Xbox/GDK package 0.11.4707.0 (PE TS 0xb6cdc688) ----
     const BuildProfile kGdkProfile_20260524 = {
