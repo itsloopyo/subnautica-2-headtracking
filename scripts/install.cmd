@@ -16,7 +16,7 @@
 :: if it disagrees with the pushed tag. The value isn't read at install time
 :: (install.ps1 reads the version from pixi.toml inside the ZIP), but the
 :: line must stay present and formatted exactly as below.
-set "MOD_VERSION=0.2.2"
+set "MOD_VERSION=0.2.3"
 
 setlocal enabledelayedexpansion
 

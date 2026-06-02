@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.3] - 2026-06-02
+
+### Other
+
+- Add gdk-wingdk-20260602 build profile
+
 ## [0.2.2] - 2026-06-02
 
 ### Other
