@@ -87,6 +87,7 @@ endif()
 
 set(CAMERAUNLOCK_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(CAMERAUNLOCK_BUILD_HOOKS ON CACHE BOOL "" FORCE)
+set(CAMERAUNLOCK_BUILD_UNREAL ON CACHE BOOL "" FORCE)
 add_subdirectory(cameraunlock-core/cpp)
 
 # Kiero - vtable hooking helper for DXGI / D3D11 / D3D12.
@@ -153,10 +154,7 @@ set(MOD_NAME Subnautica2HeadTracking)
 add_library(${MOD_NAME} SHARED
     src/Subnautica2HeadTracking/dllmain.cpp
     src/Subnautica2HeadTracking/headtracking_mod.cpp
-    src/Subnautica2HeadTracking/logging.cpp
-    src/Subnautica2HeadTracking/crash_handler.cpp
     src/Subnautica2HeadTracking/reticle_overlay.cpp
-    src/Subnautica2HeadTracking/ue_runtime.cpp
     src/Subnautica2HeadTracking/builds/build_registry.cpp
     src/Subnautica2HeadTracking/builds/steam_offsets.cpp
     src/Subnautica2HeadTracking/builds/gdk_offsets.cpp
@@ -184,6 +182,7 @@ endif()
 target_link_libraries(${MOD_NAME} PRIVATE
     cameraunlock
     cameraunlock_hooks
+    cameraunlock_unreal
     minhook
     kiero
     imgui

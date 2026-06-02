@@ -4,12 +4,12 @@
 
 #define CAMERAUNLOCK_DX12_OVERLAY_IMPLEMENTATION
 #include <cameraunlock/rendering/dx12_overlay.h>
+#include <cameraunlock/rendering/aim_quat_projection.h>
 
 #include "reticle_overlay.h"
 #include "logging.h"
 
 #include <atomic>
-#include <cmath>
 #include <mutex>
 
 namespace Subnautica2HeadTracking::ReticleOverlay
@@ -57,48 +57,27 @@ namespace Subnautica2HeadTracking::ReticleOverlay
                 return;
             }
 
-            // Clean-aim direction (UE forward +X) in the tracked camera
-            // frame = qrel * (1,0,0): first column of qrel's rotation
-            // matrix. UE camera-local axes: X=fwd, Y=right, Z=up.
-            const double depth = 1.0 - 2.0 * (qy*qy + qz*qz);
-            const double right = 2.0 * (qx*qy + qw*qz);
-            const double up    = 2.0 * (qx*qz - qw*qy);
-            if (depth <= 0.01) {  // aim behind tracked view - hide
+            // Project the clean-aim direction into the tracked view. The
+            // Hor+ (MaintainYFOV) aspect model and the viewport-edge NDC
+            // clamping both live in cameraunlock-core; SN2 holds the vertical
+            // FOV constant across aspect ratios and expands horizontal with
+            // width, so a Vert- projection over-rotates ~2x at 32:9.
+            const auto proj = cameraunlock::rendering::ProjectAimQuatHorPlus(
+                qx, qy, qz, qw, w, h,
+                g_fovHorizontalAt16x9.load(std::memory_order_relaxed),
+                kReticleRefAspect);
+            if (!proj.inFront) {  // aim behind tracked view - hide
                 g_offsetValid.store(false, std::memory_order_relaxed);
                 return;
             }
-            // Hor+ FOV: SN2 holds the vertical FOV constant across aspect
-            // ratios and expands horizontal with width. Derive the constant
-            // vertical FOV from the calibrated 16:9 horizontal value, then
-            // re-expand horizontal by the live aspect. The old
-            // `tanV = tanH / aspect` assumed a fixed horizontal FOV (Vert-),
-            // which over-rotated the reticle horizontally on ultrawide (~2x too
-            // sensitive at 32:9). At 16:9 both models coincide.
-            const float aspect = w / h;
-            const float fovH16x9 = g_fovHorizontalAt16x9.load(std::memory_order_relaxed);
-            const float tanV = std::tan(fovH16x9 * 0.5f * 0.01745329252f) / kReticleRefAspect;
-            const float tanH = tanV * aspect;
-            float ndcX = static_cast<float>(right / depth) / tanH;
-            float ndcY = static_cast<float>(up    / depth) / tanV;
-            // Clamp at the viewport edge. Without this, body-forward approaching
-            // 90deg off-axis sends right/depth into the thousands (depth->0) and
-            // the reticle/tooltip-offset shoots far off-screen. Capping NDC to
-            // |1| keeps motion bounded to the visible viewport - the reticle and
-            // tooltip both pin to the screen edge instead of accelerating away.
-            if (ndcX >  1.0f) ndcX =  1.0f;
-            if (ndcX < -1.0f) ndcX = -1.0f;
-            if (ndcY >  1.0f) ndcY =  1.0f;
-            if (ndcY < -1.0f) ndcY = -1.0f;
-            const float cx = w * 0.5f + ndcX * (w * 0.5f);
-            const float cy = h * 0.5f - ndcY * (h * 0.5f);
 
-            g_offsetX.store(cx - w * 0.5f, std::memory_order_relaxed);
-            g_offsetY.store(cy - h * 0.5f, std::memory_order_relaxed);
+            g_offsetX.store(proj.screenX - w * 0.5f, std::memory_order_relaxed);
+            g_offsetY.store(proj.screenY - h * 0.5f, std::memory_order_relaxed);
             g_offsetValid.store(true, std::memory_order_relaxed);
 
             ImDrawList* dl = ImGui::GetBackgroundDrawList();
             const ImU32 col = IM_COL32(220, 235, 255, 165);  // slightly blue-white, ~65%
-            const ImVec2 c{cx, cy};
+            const ImVec2 c{proj.screenX, proj.screenY};
             dl->AddCircleFilled(c, 2.5f, col, 16);            // dot
             dl->AddCircle(c, 16.0f, col, 32, 1.5f);           // ring
         }

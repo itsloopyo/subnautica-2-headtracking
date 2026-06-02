@@ -3,6 +3,9 @@
 #include <cstddef>
 #include <cstdint>
 
+#include <cameraunlock/memory/pe_fingerprint.h>
+#include <cameraunlock/unreal/ue_runtime.h>
+
 // One BuildProfile describes a single packaging/build of Subnautica 2: the
 // PE-header fingerprint that uniquely identifies it, and every per-build
 // constant (RVAs into the EXE, UObject/USceneComponent field offsets) the
@@ -19,12 +22,9 @@
 
 namespace Subnautica2HeadTracking
 {
-    struct PeFingerprint
-    {
-        std::uint32_t TimeDateStamp;
-        std::uint32_t SizeOfImage;
-        std::uint32_t CheckSum;
-    };
+    // PE-header build fingerprint (TimeDateStamp + SizeOfImage + CheckSum);
+    // the shared type keeps reading/matching/classification in core.
+    using PeFingerprint = ::cameraunlock::memory::PeFingerprint;
 
     struct OffsetTable
     {
@@ -78,17 +78,10 @@ namespace Subnautica2HeadTracking
             std::size_t   kPlayerCameraManager;
         } PlayerController;
 
-        struct {
-            std::uintptr_t kObjObjects;
-            std::size_t    kObjObjects_Num;
-            std::size_t    kFUObjectItemSize;
-            std::size_t    kChunkNumElems;
-            std::uintptr_t kFNamePool;
-            std::size_t    kFNamePoolBlocks;
-            std::size_t    kClassPrivate;
-            std::size_t    kNamePrivate;
-            std::size_t    kOuterPrivate;
-        } UObjectGlobals;
+        // Field order matches the per-build positional initializers in
+        // steam_offsets.cpp / gdk_offsets.cpp; the shared type is what
+        // ue::SetRuntime consumes for GUObjectArray/FName reflection.
+        ::cameraunlock::unreal::UObjectGlobalsLayout UObjectGlobals;
 
         struct {
             std::uintptr_t kCapsuleComponent;

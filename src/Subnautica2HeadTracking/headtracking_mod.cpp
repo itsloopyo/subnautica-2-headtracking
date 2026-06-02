@@ -18,13 +18,12 @@
 #include <psapi.h>
 
 #include "builds/build_registry.h"
-#include "crash_handler.h"
 #include "reticle_overlay.h"
-#include "ue_math.h"
-#include "ue_runtime.h"
 
 #include "cameraunlock/config/ini_reader.h"
+#include "cameraunlock/diagnostics/crash_handler.h"
 #include "cameraunlock/protocol/udp_receiver.h"
+#include "cameraunlock/input/chord_hotkeys.h"
 #include "cameraunlock/input/hotkey_poller.h"
 #include "cameraunlock/hooks/hook_manager.h"
 #include "cameraunlock/processing/pose_interpolator.h"
@@ -34,6 +33,9 @@
 #include "cameraunlock/math/vec3.h"
 #include "cameraunlock/math/quat4.h"
 #include "cameraunlock/math/smoothing_utils.h"
+#include "cameraunlock/time/frame_clock.h"
+#include "cameraunlock/unreal/ue_math.h"
+#include "cameraunlock/unreal/ue_runtime.h"
 
 // Runtime discovery/tuning hotkeys (mask isolator + comp, UObject/HUD dumps,
 // inject-mode cycling, standalone position toggle). Off in shipping builds:
@@ -46,11 +48,13 @@
 
 namespace Subnautica2HeadTracking
 {
+    // UE math types, fault-guarded memory access, and UObject reflection live
+    // in cameraunlock-core's unreal module. Alias it as `ue` so call sites
+    // read unqualified.
+    namespace ue = ::cameraunlock::unreal;
+
     namespace
     {
-        // UE math types, fault-guarded memory access, and UObject reflection
-        // live in the ue namespace (ue_math.h / ue_runtime.h). Pull the names
-        // into scope so the call sites below read unqualified.
         using ue::FQuat4d;
         using ue::FRotator;
         using ue::FVector;
@@ -95,52 +99,8 @@ namespace Subnautica2HeadTracking
         // standard config docs.
         std::atomic<bool> g_disableMaskComp{false};
 
-        // True while both Ctrl (either side) and Shift (either side) are held.
-        // GetAsyncKeyState(VK_CONTROL/VK_SHIFT) reports the merged left+right
-        // state, so this covers all four modifier keys. The chord letter's own
-        // edge is detected by the HotkeyPoller entry it is registered against;
-        // this just gates the callback so the bare letter does nothing in-game.
-        bool ChordHeld()
-        {
-            return (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0
-                && (GetAsyncKeyState(VK_SHIFT)   & 0x8000) != 0;
-        }
-
-        constexpr float kMaxFrameDt = 0.1f;  // clamp huge gaps (alt-tab etc.)
-
-        // Per-pipeline frame-delta clock. Returns seconds since the previous
-        // Tick(), clamped to [0, kMaxFrameDt]. Each pipeline owns an instance so
-        // their dt streams stay independent; the QPC frequency is shared (it is
-        // constant for the lifetime of the process).
-        class FrameClock {
-        public:
-            float Tick() {
-                if (!initialized_) {
-                    QueryPerformanceCounter(&last_);
-                    initialized_ = true;
-                }
-                LARGE_INTEGER now;
-                QueryPerformanceCounter(&now);
-                float dt = static_cast<float>(
-                    static_cast<double>(now.QuadPart - last_.QuadPart) /
-                    static_cast<double>(Freq().QuadPart));
-                last_ = now;
-                if (dt < 0.0f) dt = 0.0f;
-                if (dt > kMaxFrameDt) dt = kMaxFrameDt;
-                return dt;
-            }
-        private:
-            static const LARGE_INTEGER& Freq() {
-                static LARGE_INTEGER f = [] {
-                    LARGE_INTEGER q;
-                    QueryPerformanceFrequency(&q);
-                    return q;
-                }();
-                return f;
-            }
-            LARGE_INTEGER last_{};
-            bool initialized_ = false;
-        };
+        using cameraunlock::input::ChordGuarded;
+        using cameraunlock::time::FrameClock;
 
         // Pipeline state. The hook fires on the render thread only, so all
         // of this is single-thread access - no locks needed.
@@ -2367,7 +2327,7 @@ namespace Subnautica2HeadTracking
             if (GetModuleInformation(GetCurrentProcess(), exe, &mi, sizeof(mi))) {
                 end = base + mi.SizeOfImage;
             }
-            ue::SetModuleRange(base, end);
+            ue::SetRuntime(base, end, Offsets().UObjectGlobals);
             Log::Line("Module range=[0x%llx .. 0x%llx)  size=0x%llx",
                 static_cast<unsigned long long>(base),
                 static_cast<unsigned long long>(end),
@@ -2428,7 +2388,7 @@ namespace Subnautica2HeadTracking
             // Crash handler before anything else - if the build-check or
             // hook install itself faults, we want a stack in the log rather
             // than a silent process death.
-            Crash::Install();
+            cameraunlock::diagnostics::InstallCrashHandler();
             LogStartupDiagnostics(module);
             LogGameUserSettings();
 
@@ -2537,8 +2497,9 @@ namespace Subnautica2HeadTracking
             // from the nav cluster and from a Ctrl+Shift chord drawn from the
             // T/Y/U/G/H/J cluster, so keyboards without a nav cluster still
             // work. Both variants fire the same handler; the chord variant is
-            // gated on ChordHeld() and edge-detected on its letter key by the
-            // poller, so the bare letter is a no-op during gameplay.
+            // gated on the Ctrl+Shift modifier (ChordGuarded) and edge-detected
+            // on its letter key by the poller, so the bare letter is a no-op
+            // during gameplay.
             const auto recenter = []() {
                 if (g_receiver) {
                     g_receiver->Recenter();
@@ -2590,16 +2551,16 @@ namespace Subnautica2HeadTracking
 
             // Recenter: Home / Ctrl+Shift+T
             g_hotkeys->SetRecenterKey(VK_HOME, recenter);
-            g_hotkeys->AddHotkey(0x54 /* T */, [recenter]() { if (ChordHeld()) recenter(); });
+            g_hotkeys->AddHotkey(0x54 /* T */, ChordGuarded(recenter));
             // Toggle tracking: End / Ctrl+Shift+Y
             g_hotkeys->SetToggleKey(VK_END, toggleTracking);
-            g_hotkeys->AddHotkey(0x59 /* Y */, [toggleTracking]() { if (ChordHeld()) toggleTracking(); });
+            g_hotkeys->AddHotkey(0x59 /* Y */, ChordGuarded(toggleTracking));
             // Cycle tracking mode: Page Up / Ctrl+Shift+G
             g_hotkeys->AddHotkey(VK_PRIOR, cycleTrackingMode);
-            g_hotkeys->AddHotkey(0x47 /* G */, [cycleTrackingMode]() { if (ChordHeld()) cycleTrackingMode(); });
+            g_hotkeys->AddHotkey(0x47 /* G */, ChordGuarded(cycleTrackingMode));
             // Yaw mode (world/local): Page Down (or [Hotkeys] ToggleYawMode) / Ctrl+Shift+H
             g_hotkeys->AddHotkey(yawModeKey, toggleYawMode);
-            g_hotkeys->AddHotkey(0x48 /* H */, [toggleYawMode]() { if (ChordHeld()) toggleYawMode(); });
+            g_hotkeys->AddHotkey(0x48 /* H */, ChordGuarded(toggleYawMode));
 
 #if SN2HT_DEV_HOTKEYS
             // Discovery / tuning controls. Off in shipping builds - see

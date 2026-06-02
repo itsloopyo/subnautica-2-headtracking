@@ -37,9 +37,6 @@ namespace Subnautica2HeadTracking
 
         const BuildProfile& ActiveProfile();
         bool                HasActiveProfile();
-
-        // Exposed for diagnostic logging from the mod's Initialize().
-        bool ReadPeFingerprint(HMODULE host, PeFingerprint& out);
     }
 
     // Accessor for the active profile's offset table. Asserts that a profile

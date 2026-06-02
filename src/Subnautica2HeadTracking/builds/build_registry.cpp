@@ -1,7 +1,8 @@
 #include "build_registry.h"
 
 #include <array>
-#include <cstring>
+
+#include <cameraunlock/memory/pe_fingerprint.h>
 
 #include "logging.h"
 
@@ -49,35 +50,10 @@ namespace Subnautica2HeadTracking::builds
         }
     }
 
-    bool ReadPeFingerprint(HMODULE host, PeFingerprint& out)
-    {
-        if (!host) return false;
-        const auto base = reinterpret_cast<const std::uint8_t*>(host);
-        __try {
-            if (*reinterpret_cast<const std::uint16_t*>(base) != 0x5A4Du /* "MZ" */) {
-                return false;
-            }
-            const auto e_lfanew = *reinterpret_cast<const std::uint32_t*>(base + 0x3c);
-            const std::uint8_t* nt = base + e_lfanew;
-            if (*reinterpret_cast<const std::uint32_t*>(nt) != 0x00004550u /* "PE\0\0" */) {
-                return false;
-            }
-            // COFF FileHeader at nt+4 (TimeDateStamp at +4 within).
-            // PE32+ optional header at nt+0x18 (SizeOfImage @+0x38, CheckSum @+0x40).
-            out.TimeDateStamp = *reinterpret_cast<const std::uint32_t*>(nt + 4 + 4);
-            const std::uint8_t* opt = nt + 4 + 20;
-            out.SizeOfImage   = *reinterpret_cast<const std::uint32_t*>(opt + 0x38);
-            out.CheckSum      = *reinterpret_cast<const std::uint32_t*>(opt + 0x40);
-            return true;
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-            return false;
-        }
-    }
-
     MatchResult SelectProfile(HMODULE host)
     {
         PeFingerprint running{};
-        if (!ReadPeFingerprint(host, running)) {
+        if (!cameraunlock::memory::ReadPeFingerprint(host, running)) {
             Log::Line("build-check: failed to read PE header from host module");
             return MatchResult::ReadFailed;
         }
@@ -91,9 +67,7 @@ namespace Subnautica2HeadTracking::builds
                 p->Name, p->Fingerprint.TimeDateStamp,
                 p->Fingerprint.SizeOfImage, p->Fingerprint.CheckSum,
                 complete ? "" : " (incomplete - offsets TBD)");
-            if (running.TimeDateStamp == p->Fingerprint.TimeDateStamp
-             && running.SizeOfImage   == p->Fingerprint.SizeOfImage
-             && running.CheckSum      == p->Fingerprint.CheckSum) {
+            if (running.Matches(p->Fingerprint)) {
                 if (!complete) {
                     Log::Line("build-check: fingerprint matches %s but its offsets are not yet derived - staying dormant", p->Name);
                     return MatchResult::HostDiffers;
@@ -106,14 +80,16 @@ namespace Subnautica2HeadTracking::builds
 
         // No match. Classify against the primary profile so the log explains
         // direction ("patched newer", "older", or "tampered").
-        const auto& primary = *kKnownProfiles.front();
-        if (running.TimeDateStamp > primary.Fingerprint.TimeDateStamp) {
-            return MatchResult::HostNewer;
+        switch (cameraunlock::memory::ClassifyMismatch(
+                    running, kKnownProfiles.front()->Fingerprint)) {
+            case cameraunlock::memory::FingerprintMismatch::Newer:
+                return MatchResult::HostNewer;
+            case cameraunlock::memory::FingerprintMismatch::Older:
+                return MatchResult::HostOlder;
+            case cameraunlock::memory::FingerprintMismatch::Differs:
+            default:
+                return MatchResult::HostDiffers;
         }
-        if (running.TimeDateStamp < primary.Fingerprint.TimeDateStamp) {
-            return MatchResult::HostOlder;
-        }
-        return MatchResult::HostDiffers;
     }
 
     const BuildProfile& ActiveProfile()
