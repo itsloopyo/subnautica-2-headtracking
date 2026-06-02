@@ -1314,6 +1314,12 @@ namespace Subnautica2HeadTracking
         // exists (tracking off / aim behind the tracked view / out of gameplay)
         // the translation is (0,0), recentring the reticle to vanilla.
         //
+        // The image widgets (InteractionIcon/Decor/ArrowTexture) are the
+        // painted pixels, so they get the translation. The "ReticleOverlay"
+        // container is written only when no image widget is live: UMG render
+        // transforms apply to the whole subtree, so writing both an image and
+        // a container it sits inside would double-move the image.
+        //
         // This replaced the hide-and-redraw approach (SetRenderOpacity 0 + a
         // kiero/ImGui DX12 overlay drawing our own reticle): the overlay's
         // Present hook device-removed the GPU when DLSS Frame Generation was
@@ -1347,16 +1353,49 @@ namespace Subnautica2HeadTracking
                 dx *= s;
                 dy *= s;
             }
+
+            bool haveImages = false;
+            for (const ReticleWidget& w : widgets) {
+                if (!w.IsContainer && ReticleWidgetLive(w)) { haveImages = true; break; }
+            }
+
             // UE5 LWC: FVector2D = 2 doubles - see the layout note in
             // DriveTooltipMove.
             struct { double X; double Y; char pad[16]; } tr{};
             tr.X = static_cast<double>(dx);
             tr.Y = static_cast<double>(dy);
+
+            // Rate-limited diagnostic, mirroring tooltip-move. The pre-write
+            // readback of the first written widget's +0x90 translation field
+            // tells stomping apart from not-sticking: if it matches what we
+            // wrote last frame the transform is sticky (and a stationary
+            // on-screen reticle means we're moving the wrong widgets); if it
+            // reads (0,0) every frame despite non-zero writes, the game is
+            // resetting it between our writes.
+            static std::atomic<std::uint64_t> s_moveCount{0};
+            const bool logThis = (s_moveCount.fetch_add(1) % 240) == 0;
+            std::uintptr_t rbObj = 0;
+            double rbX = 0.0, rbY = 0.0;
+
+            int wrote = 0, images = 0, containers = 0;
             for (const ReticleWidget& w : widgets) {
-                if (!w.IsContainer) continue;
+                if (w.IsContainer) ++containers; else ++images;
+                if (haveImages && w.IsContainer) continue;
                 if (!ReticleWidgetLive(w)) continue;
-                SafeProcessEvent(reinterpret_cast<void*>(w.Obj),
-                                 reinterpret_cast<void*>(setTr), &tr);
+                if (logThis && !rbObj) {
+                    rbObj = w.Obj;
+                    std::uintptr_t qx = 0, qy = 0;
+                    if (SafeReadPtr(w.Obj + 0x90, qx)) std::memcpy(&rbX, &qx, 8);
+                    if (SafeReadPtr(w.Obj + 0x98, qy)) std::memcpy(&rbY, &qy, 8);
+                }
+                if (SafeProcessEvent(reinterpret_cast<void*>(w.Obj),
+                                     reinterpret_cast<void*>(setTr), &tr))
+                    ++wrote;
+            }
+            if (logThis) {
+                Log::Line("reticle-move: haveOffset=%d off=(%.1f,%.1f) wrote=%d (collected: images=%d containers=%d)  rb 0x%llx pre-write=(%.1f,%.1f)",
+                    haveOffset ? 1 : 0, dx, dy, wrote, images, containers,
+                    static_cast<unsigned long long>(rbObj), rbX, rbY);
             }
         }
 
