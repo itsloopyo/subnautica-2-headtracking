@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.2] - 2026-06-02
+
+### Other
+
+- Add steam-win64-20260601 build profile
+
 ## [Unreleased]
 
 ### Fixed
