@@ -40,10 +40,11 @@
 // Runtime discovery/tuning hotkeys (mask isolator + comp, UObject/HUD dumps,
 // inject-mode cycling, standalone position toggle). Off in shipping builds:
 // the production render path runs without them (inject mode defaults to 2,
-// mask compensation auto-enables from the persisted marks file). Set to 1 to
-// re-arm the F6-F12 / ScrollLock / Insert / Delete debug controls.
+// mask compensation auto-enables from the persisted marks file). Define to 1
+// (e.g. via CMake: -DSN2HT_DEV_HOTKEYS=1) to re-arm the F3-F12 / ScrollLock /
+// Insert / Delete debug controls.
 #ifndef SN2HT_DEV_HOTKEYS
-#define SN2HT_DEV_HOTKEYS 1
+#define SN2HT_DEV_HOTKEYS 0
 #endif
 
 namespace Subnautica2HeadTracking
@@ -113,6 +114,11 @@ namespace Subnautica2HeadTracking
         // unconditionally in GetEffectiveSmoothing - that's what makes the
         // 30Hz tracker not look like 30fps on a 60+Hz display.
         float g_userSmoothing = 0.0f;
+        // Per-axis sensitivity and inversion, applied to the smoothed output
+        // (last pipeline stage). Written once from HeadTracking.ini in
+        // BootstrapThread before the hook is installed.
+        float g_yawSens = 1.0f, g_pitchSens = 1.0f, g_rollSens = 1.0f;
+        bool  g_invertYaw = false, g_invertPitch = false, g_invertRoll = false;
 
         // Positional (6DOF) pipeline. Same single-render-thread access as the
         // rotation pipeline - no locks. Defaults (sensitivity 1.0, limits
@@ -162,9 +168,9 @@ namespace Subnautica2HeadTracking
                 g_smoothedPitch = cameraunlock::math::Smooth(g_smoothedPitch, interp.pitch, eff, dt);
                 g_smoothedRoll  = cameraunlock::math::Smooth(g_smoothedRoll,  interp.roll,  eff, dt);
             }
-            outYaw   = g_smoothedYaw;
-            outPitch = g_smoothedPitch;
-            outRoll  = g_smoothedRoll;
+            outYaw   = g_smoothedYaw   * (g_invertYaw   ? -g_yawSens   : g_yawSens);
+            outPitch = g_smoothedPitch * (g_invertPitch ? -g_pitchSens : g_pitchSens);
+            outRoll  = g_smoothedRoll  * (g_invertRoll  ? -g_rollSens  : g_rollSens);
             return true;
         }
 
@@ -828,6 +834,9 @@ namespace Subnautica2HeadTracking
 
         std::mutex                  g_reticleMutex;
         std::vector<ReticleWidget>  g_reticleWidgets;
+        // Bumped on every (re-)collection so the widget movers force a write
+        // pass when fresh widget pointers are published.
+        std::atomic<std::uint64_t>  g_widgetCollectGen{0};
         std::atomic<std::uintptr_t> g_getOpacityFn{0};
         std::atomic<std::uintptr_t> g_getVisFn{0};
         std::atomic<bool>           g_reticleMoveOn{true};
@@ -1123,6 +1132,7 @@ namespace Subnautica2HeadTracking
                 }
                 g_tooltipWidgets = tips;
             }
+            g_widgetCollectGen.fetch_add(1, std::memory_order_relaxed);
             // These are engine UFunction objects (UWidget methods); they are
             // created once and live for the process lifetime, so resolve each
             // exactly once. Re-scanning every 2s cost four full ~244k-object
@@ -1353,7 +1363,43 @@ namespace Subnautica2HeadTracking
             if (!g_reticleMoveOn.load(std::memory_order_relaxed)) return;
             const std::uintptr_t setTr = g_setRenderTranslationFn.load();
             if (!setTr) return;
-            std::vector<ReticleWidget> widgets;
+            float dx = 0.0f, dy = 0.0f;
+            const bool haveOffset = AimProjection::GetScreenOffset(dx, dy);
+            if (haveOffset) {
+                // Px -> slate units: divide by the UMG DPI scale (slate paints
+                // at units * scale px), then the user's FollowScale knob. The
+                // reticle and the tooltip live on the same HUD canvas, so one
+                // conversion covers both movers.
+                const float s = g_tooltipFollowScale.load(std::memory_order_relaxed)
+                              / g_viewportDpiScale.load(std::memory_order_relaxed);
+                dx *= s;
+                dy *= s;
+            }
+
+            // The hook fires ~35x per frame but the offset only changes on the
+            // ~4 render-caller calls, and every write below is a script-VM
+            // dispatch - skip the pass when nothing changed since the last
+            // write. The periodic forced pass re-asserts the translation every
+            // ~2 frames so a game-side stomp of RenderTransform can't stick
+            // while the offset is static; a widget re-collection (gen bump)
+            // forces a pass so fresh widget pointers get positioned.
+            static std::uint64_t s_call = 0;
+            static bool s_written = false;
+            static float s_lastDx = 0.0f, s_lastDy = 0.0f;
+            static bool s_lastValid = false;
+            static std::uint64_t s_lastGen = 0;
+            const std::uint64_t gen =
+                g_widgetCollectGen.load(std::memory_order_relaxed);
+            const bool forcePass = (s_call++ % 70) == 0;
+            if (s_written && !forcePass
+                && dx == s_lastDx && dy == s_lastDy
+                && haveOffset == s_lastValid && gen == s_lastGen) {
+                return;
+            }
+
+            // Function-static snapshot reuses capacity across calls (the hook
+            // thread is the only caller) - no per-call heap allocation.
+            static std::vector<ReticleWidget> widgets;
             {
                 std::lock_guard<std::mutex> lk(g_reticleMutex);
                 widgets = g_reticleWidgets;
@@ -1367,18 +1413,6 @@ namespace Subnautica2HeadTracking
                     if (ReticleWidgetLive(w)) { ResolveProcessEvent(w.Obj); break; }
                 }
                 if (!g_processEvent) return;
-            }
-            float dx = 0.0f, dy = 0.0f;
-            const bool haveOffset = AimProjection::GetScreenOffset(dx, dy);
-            if (haveOffset) {
-                // Px -> slate units: divide by the UMG DPI scale (slate paints
-                // at units * scale px), then the user's FollowScale knob. The
-                // reticle and the tooltip live on the same HUD canvas, so one
-                // conversion covers both movers.
-                const float s = g_tooltipFollowScale.load(std::memory_order_relaxed)
-                              / g_viewportDpiScale.load(std::memory_order_relaxed);
-                dx *= s;
-                dy *= s;
             }
 
             bool haveImages = false;
@@ -1419,6 +1453,13 @@ namespace Subnautica2HeadTracking
                                      reinterpret_cast<void*>(setTr), &tr))
                     ++wrote;
             }
+            if (wrote > 0) {
+                s_written = true;
+                s_lastDx = dx;
+                s_lastDy = dy;
+                s_lastValid = haveOffset;
+                s_lastGen = gen;
+            }
             if (logThis) {
                 Log::Line("reticle-move: haveOffset=%d off=(%.1f,%.1f) wrote=%d (collected: images=%d containers=%d)  rb 0x%llx pre-write=(%.1f,%.1f)",
                     haveOffset ? 1 : 0, dx, dy, wrote, images, containers,
@@ -1437,18 +1478,6 @@ namespace Subnautica2HeadTracking
             if (!g_tooltipMoveOn.load(std::memory_order_relaxed)) return;
             const std::uintptr_t setTr = g_setRenderTranslationFn.load();
             if (!setTr) return;
-            std::vector<TooltipWidget> widgets;
-            {
-                std::lock_guard<std::mutex> lk(g_reticleMutex);
-                widgets = g_tooltipWidgets;
-            }
-            if (widgets.empty()) return;
-            if (!g_processEvent) {
-                for (const TooltipWidget& w : widgets) {
-                    if (ReticleWidgetLive(w)) { ResolveProcessEvent(w.Obj); break; }
-                }
-                if (!g_processEvent) return;
-            }
             float dx = 0.0f, dy = 0.0f;
             const bool haveOffset = AimProjection::GetScreenOffset(dx, dy);
             float rawX = dx, rawY = dy;
@@ -1464,6 +1493,40 @@ namespace Subnautica2HeadTracking
                 // viewport_half_px * FollowScale. A separate px clamp on top broke
                 // FollowScale linearity at moderate head turns, making live tuning
                 // impossible to converge.
+            }
+
+            // Same dedup as DriveReticleMove. The hover gate below can change
+            // the per-widget write target independently of the offset, but
+            // during active tracking the offset changes on every render-caller
+            // call anyway; when it's static, the periodic forced pass bounds
+            // gate-transition latency to ~2 frames.
+            static std::uint64_t s_call = 0;
+            static bool s_written = false;
+            static float s_lastDx = 0.0f, s_lastDy = 0.0f;
+            static bool s_lastValid = false;
+            static std::uint64_t s_lastGen = 0;
+            const std::uint64_t gen =
+                g_widgetCollectGen.load(std::memory_order_relaxed);
+            const bool forcePass = (s_call++ % 70) == 0;
+            if (s_written && !forcePass
+                && dx == s_lastDx && dy == s_lastDy
+                && haveOffset == s_lastValid && gen == s_lastGen) {
+                return;
+            }
+
+            // Function-static snapshot reuses capacity across calls (the hook
+            // thread is the only caller) - no per-call heap allocation.
+            static std::vector<TooltipWidget> widgets;
+            {
+                std::lock_guard<std::mutex> lk(g_reticleMutex);
+                widgets = g_tooltipWidgets;
+            }
+            if (widgets.empty()) return;
+            if (!g_processEvent) {
+                for (const TooltipWidget& w : widgets) {
+                    if (ReticleWidgetLive(w)) { ResolveProcessEvent(w.Obj); break; }
+                }
+                if (!g_processEvent) return;
             }
             // UE5 LWC: FVector2D = 2 doubles, NOT 2 floats. Passing floats
             // here makes the engine read bytes 0-7 as a single double (the two
@@ -1492,26 +1555,9 @@ namespace Subnautica2HeadTracking
                                  reinterpret_cast<void*>(getVis), &v);
                 return v;
             };
+            bool wroteAny = false;
             for (const TooltipWidget& w : widgets) {
                 if (!ReticleWidgetLive(w)) continue;
-                // Per-frame discriminator: gate on InteractionPrompt
-                // Container's ESlateVisibility. SN2 reuses one
-                // WBP_HoverTargetInfo for both world-hover prompts
-                // AND equipped-item action prompts (eg air-bladder
-                // Inhale/Ascend). The container is Collapsed/Hidden
-                // when no world interaction is in focus and Visible
-                // when one is. The diagnostic line below logs every
-                // other candidate child's vis too so we can re-pin
-                // if SN2 patches break the gate.
-                const std::uint8_t vGate = readVis(w.Gate,             w.GateCls);
-                const std::uint8_t vObj  = readVis(w.DiagObjectName,   w.DiagObjectNameCls);
-                const std::uint8_t vPri  = readVis(w.DiagPrimary,      w.DiagPrimaryCls);
-                const std::uint8_t vSec  = readVis(w.DiagSecondary,    w.DiagSecondaryCls);
-                const std::uint8_t vTb   = readVis(w.DiagToolbarTexts, w.DiagToolbarTextsCls);
-                // Container visibilities (kept for re-pin diagnostics) -
-                // all candidate children are always "drawn", so this
-                // signal alone doesn't gate. Real gate is below.
-                (void)vGate; (void)vObj; (void)vPri; (void)vSec; (void)vTb;
                 // Real gate: SN2HoverTargetViewModel + 0x70 holds a 64-bit
                 // hover-target identity token. Zero when the player is not
                 // aiming at a hoverable (button-bar action prompt context
@@ -1520,14 +1566,22 @@ namespace Subnautica2HeadTracking
                 // Empirical: across a swim-with-bladder + look-at-
                 // fabricator session, every other VM qword stayed
                 // constant; vm+0x70 toggled 0 <-> non-zero in lockstep
-                // with the on-screen prompt mode. The container-vis
-                // probe above is left in for diag continuity (re-pin
-                // if SN2 patches change the VM layout).
+                // with the on-screen prompt mode.
                 std::uintptr_t hoverToken = 0;
                 if (w.HoverVM)
                     SafeReadPtr(w.HoverVM + 0x70, hoverToken);
                 const bool worldHover = (hoverToken != 0);
                 if (logThis) {
+                    // Candidate-child ESlateVisibility probes. These are
+                    // script-VM calls whose results only feed this diagnostic
+                    // line (the hover-token gate above replaced them), so they
+                    // run only on the rate-limited log pass - kept so the gate
+                    // can be re-pinned if SN2 patches change the VM layout.
+                    const std::uint8_t vGate = readVis(w.Gate,             w.GateCls);
+                    const std::uint8_t vObj  = readVis(w.DiagObjectName,   w.DiagObjectNameCls);
+                    const std::uint8_t vPri  = readVis(w.DiagPrimary,      w.DiagPrimaryCls);
+                    const std::uint8_t vSec  = readVis(w.DiagSecondary,    w.DiagSecondaryCls);
+                    const std::uint8_t vTb   = readVis(w.DiagToolbarTexts, w.DiagToolbarTextsCls);
                     Log::Line("  gate 0x%llx vis Container=%u ObectName=%u Primary=%u Secondary=%u ToolbarTexts=%u vm+0x70=0x%llx worldHover=%d",
                         static_cast<unsigned long long>(w.Obj),
                         vGate, vObj, vPri, vSec, vTb,
@@ -1553,6 +1607,7 @@ namespace Subnautica2HeadTracking
                 struct { double X; double Y; char pad[16]; } trZero{};
                 SafeProcessEvent(reinterpret_cast<void*>(w.Obj),
                                  reinterpret_cast<void*>(setTr), &trZero);
+                wroteAny = true;
                 bool peOk = false;
                 if (w.DiagObjectName) {
                     std::uintptr_t live = 0;
@@ -1589,6 +1644,13 @@ namespace Subnautica2HeadTracking
                         ObjectName(w.Obj).c_str(),
                         peOk ? 1 : 0, fX, fY, dX, dY);
                 }
+            }
+            if (wroteAny) {
+                s_written = true;
+                s_lastDx = dx;
+                s_lastDy = dy;
+                s_lastValid = haveOffset;
+                s_lastGen = gen;
             }
         }
 
@@ -2654,19 +2716,65 @@ namespace Subnautica2HeadTracking
 
             LoadMaskMarks();
 
-            // Yaw-mode + key from HeadTracking.ini, next to the DLL. World-space
-            // (horizon-locked) yaw is the default when the file or key is absent
-            // - a filesystem boundary, so a default read is correct here. The
-            // flag is flipped live by the toggle key below.
+            // Config from HeadTracking.ini, next to the DLL. Every key the
+            // shipped INI documents is read here; absent file or keys fall
+            // back to the same defaults the INI ships with - a filesystem
+            // boundary, so default reads are correct here.
             int yawModeKey = 0x22;  // Page Down
+            int udpPort = cameraunlock::UdpReceiver::kDefaultPort;
             {
+                // SN2 axis mapping: tracker x/z are mirrored relative to the
+                // clean-camera basis. The processor clamps z to
+                // [-limit_z, +limit_z_back] assuming negative z = forward;
+                // invert_z flips that, so forward is now +z and would hit the
+                // restricted limit_z_back. The defaults swap the two bounds so
+                // the generous 0.40 stays on forward and the restricted 0.10
+                // on backward (the INI ships the swapped values too).
+                cameraunlock::PositionSettings ps = g_posProcessor.GetSettings();
+                ps.invert_x = true;
+                ps.invert_z = true;
+                ps.limit_z = 0.10f;
+                ps.limit_z_back = 0.40f;
+
                 cameraunlock::IniReader ini;
                 const std::string iniPath = DllDirNarrow(module) + "HeadTracking.ini";
                 if (ini.Open(iniPath)) {
+                    udpPort = ini.ReadInt("Network", "Port", udpPort);
+                    if (udpPort < 1024 || udpPort > 65535) {
+                        Log::Line("config: [Network] Port %d out of range 1024-65535, using %u",
+                            udpPort, cameraunlock::UdpReceiver::kDefaultPort);
+                        udpPort = cameraunlock::UdpReceiver::kDefaultPort;
+                    }
+
+                    g_trackingEnabled.store(ini.ReadBool("Tracking", "EnableOnStartup", true));
+                    g_yawSens       = ini.ReadFloat("Tracking", "YawSensitivity", 1.0f);
+                    g_pitchSens     = ini.ReadFloat("Tracking", "PitchSensitivity", 1.0f);
+                    g_rollSens      = ini.ReadFloat("Tracking", "RollSensitivity", 1.0f);
+                    g_invertYaw     = ini.ReadBool("Tracking", "InvertYaw", false);
+                    g_invertPitch   = ini.ReadBool("Tracking", "InvertPitch", false);
+                    g_invertRoll    = ini.ReadBool("Tracking", "InvertRoll", false);
+                    g_userSmoothing = ini.ReadFloat("Tracking", "Smoothing", 0.0f);
+                    g_reticleMoveOn.store(ini.ReadBool("Tracking", "ShowReticle", true));
                     g_worldSpaceYaw.store(ini.ReadBool("Tracking", "WorldSpaceYaw", true));
-                    yawModeKey = ini.ReadHex("Hotkeys", "ToggleYawMode", 0x22);
+
                     g_tooltipMoveOn.store(ini.ReadBool("Tooltip", "FollowReticle", true));
                     g_tooltipFollowScale.store(ini.ReadFloat("Tooltip", "FollowScale", 1.0f));
+
+                    g_positionEnabled.store(ini.ReadBool("Position", "Enabled", true));
+                    ps.sensitivity_x = ini.ReadFloat("Position", "SensitivityX", ps.sensitivity_x);
+                    ps.sensitivity_y = ini.ReadFloat("Position", "SensitivityY", ps.sensitivity_y);
+                    ps.sensitivity_z = ini.ReadFloat("Position", "SensitivityZ", ps.sensitivity_z);
+                    ps.invert_x      = ini.ReadBool("Position", "InvertX", ps.invert_x);
+                    ps.invert_y      = ini.ReadBool("Position", "InvertY", ps.invert_y);
+                    ps.invert_z      = ini.ReadBool("Position", "InvertZ", ps.invert_z);
+                    ps.limit_x       = ini.ReadFloat("Position", "LimitX", ps.limit_x);
+                    ps.limit_y       = ini.ReadFloat("Position", "LimitY", ps.limit_y);
+                    ps.limit_z       = ini.ReadFloat("Position", "LimitZ", ps.limit_z);
+                    ps.limit_z_back  = ini.ReadFloat("Position", "LimitZBack", ps.limit_z_back);
+                    ps.smoothing     = ini.ReadFloat("Position", "Smoothing", ps.smoothing);
+
+                    yawModeKey = ini.ReadHex("Hotkeys", "ToggleYawMode", 0x22);
+
                     // Debug-only escape hatch. Documented intent: when a
                     // user hits a hooking conflict with another DXGI/D3D12
                     // interposer (Streamline, RTSS overlays, ReShade), let
@@ -2675,28 +2783,24 @@ namespace Subnautica2HeadTracking
                     // in the standard config docs.
                     g_disableMaskComp.store(
                         ini.ReadBool("Debug", "DisableMaskComp", false));
-                    Log::Line("config: WorldSpaceYaw=%s  ToggleYawMode=0x%02x  TooltipFollow=%s scale=%.2f  DisableMaskComp=%s",
-                        g_worldSpaceYaw.load() ? "true" : "false", yawModeKey,
+
+                    Log::Line("config: Port=%d  EnableOnStartup=%s  Sens=(Y=%.2f P=%.2f R=%.2f)  Invert=(Y=%d P=%d R=%d)  Smoothing=%.2f  ShowReticle=%s  WorldSpaceYaw=%s",
+                        udpPort,
+                        g_trackingEnabled.load() ? "true" : "false",
+                        g_yawSens, g_pitchSens, g_rollSens,
+                        g_invertYaw ? 1 : 0, g_invertPitch ? 1 : 0, g_invertRoll ? 1 : 0,
+                        g_userSmoothing,
+                        g_reticleMoveOn.load() ? "true" : "false",
+                        g_worldSpaceYaw.load() ? "true" : "false");
+                    Log::Line("config: TooltipFollow=%s scale=%.2f  PosEnabled=%s PosSmoothing=%.2f  ToggleYawMode=0x%02x  DisableMaskComp=%s",
                         g_tooltipMoveOn.load() ? "true" : "false",
                         g_tooltipFollowScale.load(),
+                        g_positionEnabled.load() ? "true" : "false",
+                        ps.smoothing, yawModeKey,
                         g_disableMaskComp.load() ? "true" : "false");
                 } else {
-                    Log::Line("config: no HeadTracking.ini next to DLL; "
-                              "WorldSpaceYaw=true, ToggleYawMode=0x22 (defaults)");
+                    Log::Line("config: no HeadTracking.ini next to DLL; using defaults");
                 }
-            }
-
-            {
-                cameraunlock::PositionSettings ps = g_posProcessor.GetSettings();
-                ps.invert_x = true;
-                ps.invert_z = true;
-                // The processor clamps z to [-limit_z, +limit_z_back] assuming
-                // negative z = forward. invert_z (above) flips that, so forward
-                // is now +z and would hit the restricted limit_z_back. Swap the
-                // two so the generous bound (0.40) stays on forward and the
-                // restricted bound (0.10) stays on backward.
-                ps.limit_z = 0.10f;
-                ps.limit_z_back = 0.40f;
                 g_posProcessor.SetSettings(ps);
             }
 
@@ -2704,9 +2808,9 @@ namespace Subnautica2HeadTracking
             g_receiver->SetLog([](const std::string& msg) {
                 Log::Line("[udp] %s", msg.c_str());
             });
-            const bool bound = g_receiver->Start(4242);
-            Log::Line("UDP receiver Start(4242) -> %s",
-                bound ? "bound" : "retry-scheduled");
+            const bool bound = g_receiver->Start(static_cast<std::uint16_t>(udpPort));
+            Log::Line("UDP receiver Start(%d) -> %s",
+                udpPort, bound ? "bound" : "retry-scheduled");
 
             g_hotkeys = std::make_unique<cameraunlock::input::HotkeyPoller>();
 
@@ -3136,7 +3240,7 @@ namespace Subnautica2HeadTracking
 
             CreateThread(nullptr, 0, ReticleCollectorThread, nullptr, 0, nullptr);
 
-            Log::Line("Awaiting OpenTrack packets on UDP 4242");
+            Log::Line("Awaiting OpenTrack packets on UDP %d", udpPort);
             Log::Line("===== bootstrap complete =====");
             return 0;
         }

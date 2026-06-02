@@ -219,7 +219,10 @@ foreach ($install in $installs) {
   }
 }
 "@
-    Set-Content -Path $statePath -Value $stateJson -Encoding UTF8
+    # Windows PowerShell 5.1's `Set-Content -Encoding UTF8` writes a UTF-8 BOM,
+    # which the Lopari launcher's strict JSON parser rejects - the mod then
+    # shows as not installed. Write BOM-less UTF-8 explicitly.
+    [System.IO.File]::WriteAllText($statePath, $stateJson, (New-Object System.Text.UTF8Encoding($false)))
     Write-Host "  Wrote .headtracking-state.json"
 }
 
