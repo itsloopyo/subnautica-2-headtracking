@@ -841,6 +841,24 @@ namespace Subnautica2HeadTracking
         std::vector<TooltipWidget>                                          g_tooltipWidgets;
         std::unordered_map<std::uintptr_t, std::pair<double, double>>       g_tooltipBaseSeen;
         std::atomic<std::uintptr_t>                                         g_setRenderTranslationFn{0};
+        // APlayerController::ProjectWorldLocationToScreen UFunction - the
+        // game's own world-to-screen projection, used to calibrate the aim
+        // projection scale (see CalibrateProjectionScale).
+        std::atomic<std::uintptr_t>                                         g_projectWorldToScreenFn{0};
+        // UWidgetLayoutLibrary::GetViewportScale UFunction + the class CDO it
+        // is invoked on (static UFunctions execute on the class default
+        // object). Gives UMG's viewport DPI scale.
+        std::atomic<std::uintptr_t>                                         g_getViewportScaleFn{0};
+        std::atomic<std::uintptr_t>                                         g_widgetLayoutLibCdo{0};
+        // UMG viewport DPI scale, measured each calibration pass. Widget
+        // render translations are in slate units and paint at
+        // units * scale real pixels, while our projected offsets are real
+        // pixels - so the movers divide by this. 1.0 at 1080p with UE's
+        // default curve, 1.333 at 1440p-tall: pushing raw pixels as slate
+        // units on a 5120x1440 display overshot the reticle by ~33%, which
+        // was the real cause of the "drifts off target" report (the FOV
+        // model itself measured correct to 1.00x).
+        std::atomic<float>                                                  g_viewportDpiScale{1.0f};
         // On by default. DriveTooltipMove gates per-frame on the live
         // ESlateVisibility of WBP_HoverTargetInfo's TextBlock_ObectName
         // child: drawn -> world-hover context, follow the reticle;
@@ -1117,13 +1135,20 @@ namespace Subnautica2HeadTracking
                 g_getVisFn.store(FindLiveObject("Function", "GetVisibility", "Widget"));
             if (!g_setRenderTranslationFn.load())
                 g_setRenderTranslationFn.store(FindLiveObject("Function", "SetRenderTranslation", "Widget"));
+            if (!g_projectWorldToScreenFn.load())
+                g_projectWorldToScreenFn.store(FindLiveObject("Function", "ProjectWorldLocationToScreen", "PlayerController"));
+            if (!g_getViewportScaleFn.load())
+                g_getViewportScaleFn.store(FindLiveObject("Function", "GetViewportScale", "WidgetLayoutLibrary"));
+            if (!g_widgetLayoutLibCdo.load())
+                g_widgetLayoutLibCdo.store(FindLiveObject("WidgetLayoutLibrary", "Default__WidgetLayoutLibrary", nullptr));
             static std::size_t lastCount = SIZE_MAX;
             if (found.size() != lastCount) {
                 lastCount = found.size();
-                Log::Line("reticle: collected %zu reticle widget(s) + %zu tooltip widget(s)  getVis=0x%llx setRenderTr=0x%llx",
+                Log::Line("reticle: collected %zu reticle widget(s) + %zu tooltip widget(s)  getVis=0x%llx setRenderTr=0x%llx worldToScreen=0x%llx",
                     found.size(), tips.size(),
                     static_cast<unsigned long long>(g_getVisFn.load()),
-                    static_cast<unsigned long long>(g_setRenderTranslationFn.load()));
+                    static_cast<unsigned long long>(g_setRenderTranslationFn.load()),
+                    static_cast<unsigned long long>(g_projectWorldToScreenFn.load()));
             }
         }
 
@@ -1346,10 +1371,12 @@ namespace Subnautica2HeadTracking
             float dx = 0.0f, dy = 0.0f;
             const bool haveOffset = AimProjection::GetScreenOffset(dx, dy);
             if (haveOffset) {
-                // Same backbuffer-px -> slate-unit conversion as the tooltip
-                // mover; the reticle and the tooltip live on the same HUD
-                // canvas, so one tuning knob covers both.
-                const float s = g_tooltipFollowScale.load(std::memory_order_relaxed);
+                // Px -> slate units: divide by the UMG DPI scale (slate paints
+                // at units * scale px), then the user's FollowScale knob. The
+                // reticle and the tooltip live on the same HUD canvas, so one
+                // conversion covers both movers.
+                const float s = g_tooltipFollowScale.load(std::memory_order_relaxed)
+                              / g_viewportDpiScale.load(std::memory_order_relaxed);
                 dx *= s;
                 dy *= s;
             }
@@ -1426,7 +1453,9 @@ namespace Subnautica2HeadTracking
             const bool haveOffset = AimProjection::GetScreenOffset(dx, dy);
             float rawX = dx, rawY = dy;
             if (haveOffset) {
-                const float s = g_tooltipFollowScale.load(std::memory_order_relaxed);
+                // Px -> slate units: same DPI-scale division as DriveReticleMove.
+                const float s = g_tooltipFollowScale.load(std::memory_order_relaxed)
+                              / g_viewportDpiScale.load(std::memory_order_relaxed);
                 dx *= s;
                 dy *= s;
                 // No hard pixel clamp here - the NDC clamp in DrawReticle already
@@ -1563,6 +1592,143 @@ namespace Subnautica2HeadTracking
             }
         }
 
+        // Set while CalibrateProjectionScale is inside the game's
+        // WorldToScreen. WTS resolves its view via ULocalPlayer::GetViewPoint,
+        // which calls GetPlayerViewPoint - re-entering our hook through the
+        // very render caller the calibration runs on. Without this guard the
+        // re-entry calls WTS again: exponential recursion that freezes the
+        // game (observed in testing - log spammed every ~4ms). The hook
+        // passes straight through to the original while the flag is set,
+        // which also hands WTS the CLEAN view - exactly what the calibration
+        // measurement needs. thread_local because the nested call is
+        // synchronous on the calling thread; other threads' GPV calls must
+        // not be affected.
+        thread_local bool t_inWorldToScreen = false;
+
+        // Measure the game's true projection scale (viewport px per unit of
+        // tan(angle) off the view axis) by pushing three test points through
+        // the game's own APlayerController::ProjectWorldLocationToScreen and
+        // differencing the results.
+        //
+        // Why measure instead of model: the FMinimalViewInfo.FOV scalar is
+        // reinterpreted by the engine's AspectRatioAxisConstraint (under
+        // MaintainXFOV it is the horizontal FOV, under MaintainYFOV the
+        // vertical), and runtime FOV effects (zoom, underwater) are applied
+        // after GPV - a hand-rolled model has to guess all of that, and
+        // guessing wrong is exactly the "reticle drifts off target" report.
+        // WorldToScreen inherits the game's real projection matrix.
+        //
+        // Differencing makes the measurement independent of which exact view
+        // WTS resolves (clean, and possibly a frame stale): the projection is
+        // exactly linear in (right/depth, up/depth), so the deltas isolate
+        // the scale terms.
+        //
+        // ProcessEvent: the widget-resolved g_processEvent is the BASE
+        // UObject::ProcessEvent (a widget does not override slot 76). Calling
+        // the base on an actor is safe - it only touches UObject-level state
+        // (class/function tables). The documented hazard is the inverse:
+        // AActor's RPC-aware override called on a widget derefs actor fields
+        // that don't exist there.
+        void CalibrateProjectionScale(void* controller,
+                                      const FVector& camPos,
+                                      const FQuat4d& baseQ)
+        {
+            const std::uintptr_t wtsFn = g_projectWorldToScreenFn.load();
+            if (!wtsFn || !g_processEvent) return;
+
+            // The scale only changes when the FOV does (slider, zoom,
+            // underwater effects) - sub-second tracking is plenty. Rate-limit
+            // to bound the extra GPV pass-through traffic the WTS calls
+            // generate.
+            static std::atomic<std::uint64_t> s_calibrateCount{0};
+            if ((s_calibrateCount.fetch_add(1, std::memory_order_relaxed) % 16) != 0)
+                return;
+
+            // APlayerController::ProjectWorldLocationToScreen(
+            //     const FVector& WorldLocation, FVector2D& ScreenLocation,
+            //     bool bPlayerViewportRelative) -> bool
+            // UFunction param layout (UE5 LWC: FVector = 3 doubles,
+            // FVector2D = 2 doubles).
+            struct WtsParams {
+                double WX, WY, WZ;        // WorldLocation
+                double SX, SY;            // ScreenLocation (out)
+                bool   ViewportRelative;  // offset 40
+                bool   ReturnValue;       // offset 41
+                char   pad[6];
+            };
+
+            auto project = [&](const FVector& p, double& sx, double& sy) -> bool {
+                WtsParams params{};
+                params.WX = p.X; params.WY = p.Y; params.WZ = p.Z;
+                params.ViewportRelative = false;
+                if (!SafeProcessEvent(controller,
+                                      reinterpret_cast<void*>(wtsFn), &params))
+                    return false;
+                if (!params.ReturnValue) return false;
+                sx = params.SX; sy = params.SY;
+                return true;
+            };
+
+            const FVector fwd   = QuatRotateVec(baseQ, FVector{1.0, 0.0, 0.0});
+            const FVector right = QuatRotateVec(baseQ, FVector{0.0, 1.0, 0.0});
+            const FVector up    = QuatRotateVec(baseQ, FVector{0.0, 0.0, 1.0});
+            constexpr double kDist  = 10000.0;  // 100 m ahead
+            constexpr double kRatio = 0.25;     // test points at tan = 0.25 off-axis
+
+            const FVector p0{camPos.X + fwd.X * kDist,
+                             camPos.Y + fwd.Y * kDist,
+                             camPos.Z + fwd.Z * kDist};
+            const FVector p1{p0.X + right.X * kDist * kRatio,
+                             p0.Y + right.Y * kDist * kRatio,
+                             p0.Z + right.Z * kDist * kRatio};
+            const FVector p2{p0.X + up.X * kDist * kRatio,
+                             p0.Y + up.Y * kDist * kRatio,
+                             p0.Z + up.Z * kDist * kRatio};
+
+            // No early returns between set and clear - the guard must come
+            // off even when a projection fails.
+            double s0x = 0, s0y = 0, s1x = 0, s1y = 0, s2x = 0, s2y = 0;
+            t_inWorldToScreen = true;
+            const bool ok = project(p0, s0x, s0y)
+                         && project(p1, s1x, s1y)
+                         && project(p2, s2x, s2y);
+            t_inWorldToScreen = false;
+            if (ok) {
+                // Screen y grows downward, so a point above centre has smaller y.
+                AimProjection::SetProjectionScale(
+                    static_cast<float>((s1x - s0x) / kRatio),
+                    static_cast<float>((s0y - s2y) / kRatio));
+            }
+
+            // UMG viewport DPI scale, from the engine's own px <-> slate-unit
+            // conversion. Same measure-don't-model rationale: the game may
+            // customise the DPI curve. Independent of the WTS measurement
+            // above. Guarded the same way out of caution about engine
+            // internals re-entering GPV.
+            const std::uintptr_t vsFn  = g_getViewportScaleFn.load();
+            const std::uintptr_t vsCdo = g_widgetLayoutLibCdo.load();
+            if (vsFn && vsCdo) {
+                struct { void* WorldContextObject; float ReturnValue; char pad[4]; } vs{};
+                vs.WorldContextObject = controller;
+                t_inWorldToScreen = true;
+                const bool vsOk = SafeProcessEvent(
+                    reinterpret_cast<void*>(vsCdo),
+                    reinterpret_cast<void*>(vsFn), &vs);
+                t_inWorldToScreen = false;
+                if (vsOk && vs.ReturnValue > 0.1f && vs.ReturnValue < 10.0f) {
+                    const float prev = g_viewportDpiScale.exchange(
+                        vs.ReturnValue, std::memory_order_relaxed);
+                    static std::atomic<bool> s_scaleLogged{false};
+                    if (!s_scaleLogged.exchange(true)
+                        || std::abs(prev - vs.ReturnValue) > 0.01f) {
+                        Log::Line("ui-scale: UMG viewport DPI scale = %.3f "
+                                  "(px offsets are divided by this for slate translation)",
+                            vs.ReturnValue);
+                    }
+                }
+            }
+        }
+
         // Inject-mode caller-RVA table lives on the active build profile
         // (see builds/build_profile.h, Offsets().kKnownCallerRvas). GPV is virtual, so
         // callers can't be relocated statically; re-bisect via inject-mode 0
@@ -1677,6 +1843,13 @@ namespace Subnautica2HeadTracking
 
         void __fastcall GetPlayerViewPoint_Hook(void* self, FVector* outLocation, FRotator* outRotation)
         {
+            // Re-entry from the calibration's WorldToScreen call: hand the
+            // engine the clean view and do nothing else. See t_inWorldToScreen.
+            if (t_inWorldToScreen) {
+                g_origGetPlayerViewPoint(self, outLocation, outRotation);
+                return;
+            }
+
             const void* retAddr = _ReturnAddress();
             const std::uintptr_t retRva = ue::ModuleBase() != 0
                 ? reinterpret_cast<std::uintptr_t>(retAddr) - ue::ModuleBase()
@@ -1893,6 +2066,11 @@ namespace Subnautica2HeadTracking
                     }
                 }
             }
+
+            // Calibrate the projection scale against the game's own
+            // WorldToScreen each renderer frame. Supersedes the FOV model
+            // above (kept as the fallback when the UFunction isn't resolved).
+            CalibrateProjectionScale(self, postLoc, baseQ);
 
             // Drive the mask isolator with the same tracker delta. When a
             // slot is selected, head movement visibly rotates exactly that

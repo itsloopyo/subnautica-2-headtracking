@@ -13,6 +13,7 @@
 #include "logging.h"
 
 #include <atomic>
+#include <cmath>
 #include <mutex>
 #include <windows.h>
 
@@ -31,6 +32,11 @@ namespace Subnautica2HeadTracking::AimProjection
         constexpr float kReticleFovDefaultAt16x9 = 90.0f;
         constexpr float kReticleRefAspect = 16.0f / 9.0f;
         std::atomic<float> g_fovHorizontalAt16x9{kReticleFovDefaultAt16x9};
+
+        // Game-measured projection scale (px per tan unit). 0 = not calibrated
+        // yet; the FOV model above is the fallback until the first measurement.
+        std::atomic<float> g_pxPerTanRight{0.0f};
+        std::atomic<float> g_pxPerTanUp{0.0f};
 
         std::mutex g_aimMutex;
         double g_qx = 0.0, g_qy = 0.0, g_qz = 0.0, g_qw = 1.0;
@@ -95,10 +101,37 @@ namespace Subnautica2HeadTracking::AimProjection
             const float w = static_cast<float>(rc.right);
             const float h = static_cast<float>(rc.bottom);
 
-            // Hor+ (MaintainYFOV) aspect model and viewport-edge NDC clamping
-            // both live in cameraunlock-core; SN2 holds the vertical FOV
-            // constant across aspect ratios and expands horizontal with width,
-            // so a Vert- projection over-rotates ~2x at 32:9.
+            // Preferred path: scale measured from the game's own WorldToScreen.
+            const float pxR = g_pxPerTanRight.load(std::memory_order_relaxed);
+            const float pxU = g_pxPerTanUp.load(std::memory_order_relaxed);
+            if (pxR > 0.0f && pxU > 0.0f) {
+                // Clean-aim direction in the tracked camera frame = qrel*(1,0,0):
+                // first column of qrel's rotation matrix. UE camera-local axes:
+                // X=fwd, Y=right, Z=up.
+                const double depth = 1.0 - 2.0 * (g_qy*g_qy + g_qz*g_qz);
+                const double right = 2.0 * (g_qx*g_qy + g_qw*g_qz);
+                const double up    = 2.0 * (g_qx*g_qz - g_qw*g_qy);
+                if (depth <= 0.01) {  // aim behind tracked view - no valid offset
+                    g_offsetValid.store(false, std::memory_order_relaxed);
+                    return;
+                }
+                float offX = static_cast<float>(right / depth) * pxR;
+                float offY = static_cast<float>(-(up / depth)) * pxU;
+                // Pin to the viewport edge, same intent as the NDC clamp in the
+                // FOV path: depth->0 sends the offset to thousands of px.
+                const float maxX = w * 0.5f, maxY = h * 0.5f;
+                if (offX >  maxX) offX =  maxX;
+                if (offX < -maxX) offX = -maxX;
+                if (offY >  maxY) offY =  maxY;
+                if (offY < -maxY) offY = -maxY;
+                g_offsetX.store(offX, std::memory_order_relaxed);
+                g_offsetY.store(offY, std::memory_order_relaxed);
+                g_offsetValid.store(true, std::memory_order_relaxed);
+                return;
+            }
+
+            // Fallback: FMinimalViewInfo-FOV model. Hor+ (MaintainYFOV) aspect
+            // scaling and viewport-edge NDC clamping live in cameraunlock-core.
             const auto proj = cameraunlock::rendering::ProjectAimQuatHorPlus(
                 g_qx, g_qy, g_qz, g_qw, w, h,
                 g_fovHorizontalAt16x9.load(std::memory_order_relaxed),
@@ -137,6 +170,46 @@ namespace Subnautica2HeadTracking::AimProjection
         // realistic horizontal FOV.
         if (fovDegrees >= 10.0f && fovDegrees <= 170.0f) {
             g_fovHorizontalAt16x9.store(fovDegrees, std::memory_order_relaxed);
+        }
+    }
+
+    void SetProjectionScale(float pxPerTanRight, float pxPerTanUp)
+    {
+        // Degenerate measurement (camera cache not initialised yet, points
+        // coincident): keep whatever we have.
+        if (!(pxPerTanRight > 50.0f && pxPerTanUp > 50.0f)) return;
+
+        const float prev = g_pxPerTanRight.exchange(pxPerTanRight,
+                                                    std::memory_order_relaxed);
+        g_pxPerTanUp.store(pxPerTanUp, std::memory_order_relaxed);
+
+        // One-shot diagnostic on first calibration: the implied FOVs reveal
+        // which aspect-constraint model the game really uses, and the ratio
+        // against the FMinimalViewInfo model quantifies how far off that
+        // model was (the source of the "reticle drifts off target" report).
+        if (prev == 0.0f) {
+            std::lock_guard<std::mutex> lk(g_aimMutex);
+            RECT rc{};
+            const HWND wnd = GameWindow();
+            if (wnd && GetClientRect(wnd, &rc) && rc.right > 0 && rc.bottom > 0) {
+                const float w = static_cast<float>(rc.right);
+                const float h = static_cast<float>(rc.bottom);
+                constexpr float kRadToDeg = 57.29577951f;
+                constexpr float kDegToRad = 0.01745329252f;
+                const float fovH = 2.0f * std::atan((w * 0.5f) / pxPerTanRight) * kRadToDeg;
+                const float fovV = 2.0f * std::atan((h * 0.5f) / pxPerTanUp) * kRadToDeg;
+                const float fovModelTanV = std::tan(
+                    g_fovHorizontalAt16x9.load(std::memory_order_relaxed)
+                        * 0.5f * kDegToRad) / kReticleRefAspect;
+                const float fovModelPxPerTanRight =
+                    (w * 0.5f) / (fovModelTanV * (w / h));
+                Log::Line("aim-projection: calibrated via WorldToScreen  "
+                          "x=%.1f y=%.1f px/tan  implied FOV H=%.1f V=%.1f deg  "
+                          "(FOV-model x=%.1f px/tan -> was off by %.2fx)",
+                    pxPerTanRight, pxPerTanUp, fovH, fovV,
+                    fovModelPxPerTanRight,
+                    fovModelPxPerTanRight / pxPerTanRight);
+            }
         }
     }
 

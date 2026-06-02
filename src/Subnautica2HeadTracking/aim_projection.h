@@ -14,8 +14,19 @@ namespace Subnautica2HeadTracking::AimProjection
     // FOV scalar (treated as the 16:9-reference horizontal FOV; the projector
     // re-derives per-aspect Hor+ scaling), so the projected offset stays correct
     // when the player changes the FOV slider or zooms. Values outside a sane
-    // range are ignored.
+    // range are ignored. Fallback only - superseded by SetProjectionScale.
     void SetFovDegrees(float fovDegrees);
+
+    // Push the game-measured projection scale: viewport pixels of screen offset
+    // per unit of tan(angle) off the view axis, per axis. Measured by pushing
+    // test points through the game's own ProjectWorldLocationToScreen, so it
+    // inherits the game's true FOV, aspect-ratio constraint, and any runtime
+    // FOV effects (zoom, underwater) - none of which the FMinimalViewInfo-FOV
+    // model can capture (its FOV scalar is reinterpreted by the engine's
+    // AspectRatioAxisConstraint, which we would otherwise have to guess).
+    // Once a valid measurement arrives, it supersedes the FOV model.
+    // Degenerate measurements are ignored.
+    void SetProjectionScale(float pxPerTanRight, float pxPerTanUp);
 
     // Refresh only the active flag without touching the cached qrel. Called
     // by the GPV hook on non-renderer callers (caller-gate rejects them) so
