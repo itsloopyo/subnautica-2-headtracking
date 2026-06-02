@@ -2443,15 +2443,17 @@ namespace Subnautica2HeadTracking
                 Log::Line("============================================================");
                 Log::Line(" GAME BUILD MISMATCH - HEAD TRACKING DISABLED");
                 switch (matchResult) {
+                    // SN2's PE TimeDateStamp is a deterministic-build hash, not
+                    // a timestamp (the 2026-05-22 build has a HIGHER value than
+                    // the 2026-06-01 build), so newer/older direction can't be
+                    // told apart - both get the same guidance.
                     case builds::MatchResult::HostNewer:
-                        Log::Line(" Subnautica 2 is NEWER than any build this mod knows.");
-                        Log::Line(" The game was updated - check the Releases page");
-                        Log::Line(" for a matching mod version:");
-                        Log::Line(" https://github.com/itsloopyo/subnautica-2-headtracking/releases");
-                        break;
                     case builds::MatchResult::HostOlder:
-                        Log::Line(" Subnautica 2 is OLDER than any build this mod knows.");
-                        Log::Line(" Let Steam finish updating the game, then relaunch.");
+                        Log::Line(" This Subnautica 2 build doesn't match any build this");
+                        Log::Line(" mod knows. If the game just updated, check the Releases");
+                        Log::Line(" page for a matching mod version:");
+                        Log::Line(" https://github.com/itsloopyo/subnautica-2-headtracking/releases");
+                        Log::Line(" If Steam is mid-update, let it finish and relaunch.");
                         break;
                     case builds::MatchResult::HostDiffers:
                         Log::Line(" The Subnautica 2 EXE differs from every build this mod");

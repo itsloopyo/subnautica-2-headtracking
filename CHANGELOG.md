@@ -1,5 +1,25 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Support the 2026-06-01 Steam build (PE ts 0x72247abc). The patch relinked
+  the EXE, so the build-fingerprint failsafe disabled the mod (it correctly
+  refused to hook stale RVAs). Added build profile `steam-win64-20260601`
+  with re-derived RVAs (GPV 0x043ee420, render caller retRVA 0x04172827,
+  ObjObjects 0x0cd23980, FNamePool 0x0cc3f780); older profiles retained.
+- Build-mismatch log no longer claims "OLDER/NEWER" - SN2's PE TimeDateStamp
+  is a deterministic-build hash, not a timestamp, so direction is meaningless.
+
+### Added
+
+- `scripts/derive_rvas.py` + `scripts/derive_globals.py`: deterministic
+  RVA re-derivation via pefile + capstone (PE signature scan + .pdata
+  function table), independent of Ghidra full analysis. Ghidra's analysis
+  repeatedly OOM'd/under-analyzed this 225MB UE5 binary; the signature
+  approach relocates GPV / render caller / ObjObjects / FNamePool in seconds.
+
 ## [0.2.1] - 2026-05-28
 
 ### Other

@@ -77,25 +77,34 @@ function Read-PEFingerprint {
     }
 }
 
-function Read-ExpectedFingerprint {
+function Read-ExpectedFingerprints {
     param([string]$ProjectDir)
-    # steam_offsets.cpp ships Fingerprint as a struct initialiser literal:
+    # Each profile ships its Fingerprint as a struct initialiser literal:
     #   /* Fingerprint */ { 0xb727d315u, 0x0ddcb000u, 0x0d7d4cc3u },
-    # Grab the three hex words after the Fingerprint comment.
-    $cppPath = Join-Path $ProjectDir 'src/Subnautica2HeadTracking/builds/steam_offsets.cpp'
-    if (-not (Test-Path $cppPath)) {
-        throw "steam_offsets.cpp not found at $cppPath"
+    # preceded by a /* Name */ "store-platform-YYYYMMDD" line. Collect every
+    # profile across both offset files, mirroring builds::SelectProfile.
+    $profiles = @()
+    foreach ($file in 'steam_offsets.cpp', 'gdk_offsets.cpp') {
+        $cppPath = Join-Path $ProjectDir "src/Subnautica2HeadTracking/builds/$file"
+        if (-not (Test-Path $cppPath)) {
+            throw "$file not found at $cppPath"
+        }
+        $cpp = Get-Content -Raw $cppPath
+        $pattern = '(?s)Name\s*\*/\s*"([^"]+)".*?Fingerprint\s*\*/\s*\{\s*0x([0-9a-fA-F]+)u?\s*,\s*0x([0-9a-fA-F]+)u?\s*,\s*0x([0-9a-fA-F]+)u?\s*\}'
+        $found = [regex]::Matches($cpp, $pattern)
+        if ($found.Count -eq 0) {
+            throw "No profile fingerprints found in $file"
+        }
+        foreach ($m in $found) {
+            $profiles += [pscustomobject]@{
+                Name          = $m.Groups[1].Value
+                TimeDateStamp = [Convert]::ToUInt32($m.Groups[2].Value, 16)
+                SizeOfImage   = [Convert]::ToUInt32($m.Groups[3].Value, 16)
+                CheckSum      = [Convert]::ToUInt32($m.Groups[4].Value, 16)
+            }
+        }
     }
-    $cpp = Get-Content -Raw $cppPath
-    $pattern = 'Fingerprint\s*\*/\s*\{\s*0x([0-9a-fA-F]+)u?\s*,\s*0x([0-9a-fA-F]+)u?\s*,\s*0x([0-9a-fA-F]+)u?\s*\}'
-    if ($cpp -notmatch $pattern) {
-        throw 'Fingerprint initialiser not found in steam_offsets.cpp'
-    }
-    return [pscustomobject]@{
-        TimeDateStamp = [Convert]::ToUInt32($Matches[1], 16)
-        SizeOfImage   = [Convert]::ToUInt32($Matches[2], 16)
-        CheckSum      = [Convert]::ToUInt32($Matches[3], 16)
-    }
+    return $profiles
 }
 
 try {
@@ -106,27 +115,28 @@ try {
 }
 
 Write-Host "EXE:      $exe"
-$running  = Read-PEFingerprint  -Path $exe
-$expected = Read-ExpectedFingerprint -ProjectDir $projectDir
+$running  = Read-PEFingerprint -Path $exe
+$profiles = Read-ExpectedFingerprints -ProjectDir $projectDir
 
 Write-Host ("Running:  ts=0x{0:x8} size=0x{1:x8} csum=0x{2:x8}" -f $running.TimeDateStamp, $running.SizeOfImage, $running.CheckSum)
-Write-Host ("Expected: ts=0x{0:x8} size=0x{1:x8} csum=0x{2:x8}" -f $expected.TimeDateStamp, $expected.SizeOfImage, $expected.CheckSum)
+foreach ($p in $profiles) {
+    Write-Host ("Profile:  ts=0x{0:x8} size=0x{1:x8} csum=0x{2:x8}  {3}" -f $p.TimeDateStamp, $p.SizeOfImage, $p.CheckSum, $p.Name)
+}
 
-if ($running.TimeDateStamp -eq $expected.TimeDateStamp `
- -and $running.SizeOfImage -eq $expected.SizeOfImage `
- -and $running.CheckSum    -eq $expected.CheckSum) {
-    Write-Host "MATCH - no rederivation needed." -ForegroundColor Green
+$match = $profiles | Where-Object {
+    $running.TimeDateStamp -eq $_.TimeDateStamp `
+    -and $running.SizeOfImage -eq $_.SizeOfImage `
+    -and $running.CheckSum -eq $_.CheckSum
+} | Select-Object -First 1
+
+if ($match) {
+    Write-Host ("MATCH - profile {0}, no rederivation needed." -f $match.Name) -ForegroundColor Green
     exit 0
 }
 
-if ($running.TimeDateStamp -gt $expected.TimeDateStamp) {
-    Write-Host "MISMATCH: EXE is NEWER than the committed offsets." -ForegroundColor Yellow
-    Write-Host "  The game was updated. Re-import in Ghidra and rederive RVAs before shipping."
-} elseif ($running.TimeDateStamp -lt $expected.TimeDateStamp) {
-    Write-Host "MISMATCH: EXE is OLDER than the committed offsets." -ForegroundColor Yellow
-    Write-Host "  Steam may have a pending update, or this is a legacy/beta branch install."
-} else {
-    Write-Host "MISMATCH: same timestamp, different size/checksum." -ForegroundColor Yellow
-    Write-Host "  Unusual - hand-patched/tampered EXE or a fluke rebuild."
-}
+# SN2's TimeDateStamp is a deterministic-build hash, not a timestamp, so
+# newer/older direction can't be inferred from it.
+Write-Host "MISMATCH: EXE matches no committed profile." -ForegroundColor Yellow
+Write-Host "  If the game was updated, re-import in Ghidra, rederive RVAs, and ADD a new"
+Write-Host "  build profile (never edit existing ones - see AGENTS.md append-only policy)."
 exit 1
