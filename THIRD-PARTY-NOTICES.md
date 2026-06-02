@@ -8,27 +8,8 @@ components.
 - **Version:** 1.3.3
 - **License:** BSD-2-Clause
 - **Upstream:** https://github.com/TsudaKageyu/minhook
-- **Usage:** Inline function hooking for the camera and reticle hooks.
+- **Usage:** Inline function hooking for the camera hook.
 - **Bundled:** no. Statically linked into the mod DLL via cameraunlock-core.
-
----
-
-## Dear ImGui
-
-- **License:** MIT
-- **Upstream:** https://github.com/ocornut/imgui
-- **Usage:** Draws the D3D12 reticle overlay (via cameraunlock-core's DX12Overlay).
-- **Bundled:** no. Statically linked into the mod DLL via cameraunlock-core.
-
----
-
-## Kiero
-
-- **License:** MIT
-- **Copyright:** Copyright (c) 2014-2021 Rebzzel
-- **Upstream:** https://github.com/Rebzzel/kiero
-- **Usage:** DXGI / D3D12 vtable hook helper for the reticle overlay.
-- **Bundled:** no. Statically linked into the mod DLL.
 
 ---
 

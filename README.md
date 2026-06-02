@@ -183,7 +183,7 @@ InvertPitch = false
 InvertRoll = false
 Smoothing = 0.0        ; 0.0 = responsive, 1.0 = heavy (0.15 floor applied internally)
 AimDecoupling = true   ; head moves view, mouse/controller still aims
-ShowReticle = true     ; draw the aim-compensated reticle
+ShowReticle = true     ; move the game's reticle to the aim point
 WorldSpaceYaw = true   ; true = horizon-locked yaw (default), false = camera-local
 
 [Position]

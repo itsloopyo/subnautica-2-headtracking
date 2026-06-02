@@ -18,7 +18,7 @@
 #include <psapi.h>
 
 #include "builds/build_registry.h"
-#include "reticle_overlay.h"
+#include "aim_projection.h"
 
 #include "cameraunlock/config/ini_reader.h"
 #include "cameraunlock/diagnostics/crash_handler.h"
@@ -771,7 +771,13 @@ namespace Subnautica2HeadTracking
         // we re-read +0x10 on the game thread and require it still equals Cls -
         // a freed/reused slot won't match and is skipped. This is what keeps
         // save-load from crashing in the script VM.
-        struct ReticleWidget { std::uintptr_t Obj; std::uintptr_t Cls; };
+        //
+        // IsContainer marks the "ReticleOverlay" UOverlay - the panel that owns
+        // the reticle images (InteractionIcon/Decor/ArrowTexture). Only the
+        // container gets SetRenderTranslation pushed: UMG render transforms
+        // apply to the whole subtree, so translating both the panel and its
+        // children would double-move the children.
+        struct ReticleWidget { std::uintptr_t Obj; std::uintptr_t Cls; bool IsContainer; };
 
         // WBP_HoverTargetInfo is reused by SN2 for two unrelated roles - the
         // world-hover interaction prompt (point at a PDA / fragment) AND
@@ -823,9 +829,7 @@ namespace Subnautica2HeadTracking
         std::mutex                  g_reticleMutex;
         std::vector<ReticleWidget>  g_reticleWidgets;
         std::atomic<std::uintptr_t> g_getOpacityFn{0};
-        std::atomic<std::uintptr_t> g_setOpacityFn{0};
         std::atomic<std::uintptr_t> g_getVisFn{0};
-        std::atomic<std::uintptr_t> g_setVisFn{0};
         std::atomic<bool>           g_reticleMoveOn{true};
 
         // Tooltip widgets: see TooltipWidget comment above for the
@@ -866,12 +870,13 @@ namespace Subnautica2HeadTracking
                 && cls == w.Cls;
         }
 
-        // Collect the reticle-texture widgets by name. The ref-scan dump showed
-        // the on-screen reticle is drawn by these UImage widgets (UMG keeps
-        // archetype copies alongside the painted instance, all live UObjects;
-        // we can't tell which is on-screen by name, so we zero RenderOpacity on
-        // every instance and the painted one is necessarily among them). Name
-        // matching is cheap - the byte-scan variant froze the game thread.
+        // Collect the reticle widgets by name. The ref-scan dump showed the
+        // on-screen reticle is the "ReticleOverlay" UOverlay holding these
+        // UImage children (UMG keeps archetype copies alongside the painted
+        // instance, all live UObjects; we can't tell which is on-screen by
+        // name, so we translate every container instance and the painted one
+        // is necessarily among them). Name matching is cheap - the byte-scan
+        // variant froze the game thread.
         void CollectReticleWidgets() {
             static const char* kReticleNames[] = {
                 "InteractionIcon", "Decor", "ArrowTexture", "ReticleOverlay",
@@ -985,7 +990,7 @@ namespace Subnautica2HeadTracking
                     if (on == nm) {
                         std::uintptr_t cls = 0;
                         if (SafeReadPtr(obj + Offsets().UObjectGlobals.kClassPrivate, cls) && cls)
-                            found.push_back({obj, cls});
+                            found.push_back({obj, cls, on == "ReticleOverlay"});
                         return false;
                     }
                 }
@@ -1108,21 +1113,16 @@ namespace Subnautica2HeadTracking
             // unresolved (during warmup, before the widget classes exist).
             if (!g_getOpacityFn.load())
                 g_getOpacityFn.store(FindLiveObject("Function", "GetRenderOpacity", "Widget"));
-            if (!g_setOpacityFn.load())
-                g_setOpacityFn.store(FindLiveObject("Function", "SetRenderOpacity", "Widget"));
             if (!g_getVisFn.load())
                 g_getVisFn.store(FindLiveObject("Function", "GetVisibility", "Widget"));
-            if (!g_setVisFn.load())
-                g_setVisFn.store(FindLiveObject("Function", "SetVisibility", "Widget"));
             if (!g_setRenderTranslationFn.load())
                 g_setRenderTranslationFn.store(FindLiveObject("Function", "SetRenderTranslation", "Widget"));
             static std::size_t lastCount = SIZE_MAX;
             if (found.size() != lastCount) {
                 lastCount = found.size();
-                Log::Line("reticle: collected %zu reticle-texture + %zu tooltip widget(s)  setOpacity=0x%llx setVis=0x%llx setRenderTr=0x%llx",
+                Log::Line("reticle: collected %zu reticle widget(s) + %zu tooltip widget(s)  getVis=0x%llx setRenderTr=0x%llx",
                     found.size(), tips.size(),
-                    static_cast<unsigned long long>(g_setOpacityFn.load()),
-                    static_cast<unsigned long long>(g_setVisFn.load()),
+                    static_cast<unsigned long long>(g_getVisFn.load()),
                     static_cast<unsigned long long>(g_setRenderTranslationFn.load()));
             }
         }
@@ -1308,15 +1308,20 @@ namespace Subnautica2HeadTracking
             return (v & Offsets().PlayerController.kShowMouseCursorMask) == 0;
         }
 
-        // Per render frame: force the InteractionIcon reticle to opacity 0 via
-        // SetRenderOpacity (single float, confirmed). Driven from many GPV
-        // callers per frame to win against any per-frame reset. If the on-screen
-        // reticle vanishes, this is definitively the widget AND the setter
-        // propagates to Slate.
+        // Per gameplay frame: drag the game's own reticle to the body-forward
+        // aim point by writing its RenderTransform.Translation - the same
+        // ProcessEvent path as the tooltip mover below. When no valid offset
+        // exists (tracking off / aim behind the tracked view / out of gameplay)
+        // the translation is (0,0), recentring the reticle to vanilla.
+        //
+        // This replaced the hide-and-redraw approach (SetRenderOpacity 0 + a
+        // kiero/ImGui DX12 overlay drawing our own reticle): the overlay's
+        // Present hook device-removed the GPU when DLSS Frame Generation was
+        // active, because Streamline owns swapchain presentation under FG.
         void DriveReticleMove() {
             if (!g_reticleMoveOn.load(std::memory_order_relaxed)) return;
-            const std::uintptr_t setOp = g_setOpacityFn.load();
-            if (!setOp) return;
+            const std::uintptr_t setTr = g_setRenderTranslationFn.load();
+            if (!setTr) return;
             std::vector<ReticleWidget> widgets;
             {
                 std::lock_guard<std::mutex> lk(g_reticleMutex);
@@ -1332,22 +1337,36 @@ namespace Subnautica2HeadTracking
                 }
                 if (!g_processEvent) return;
             }
-            struct { float Opacity; char pad[28]; } op{};
-            op.Opacity = 0.0f;
+            float dx = 0.0f, dy = 0.0f;
+            const bool haveOffset = AimProjection::GetScreenOffset(dx, dy);
+            if (haveOffset) {
+                // Same backbuffer-px -> slate-unit conversion as the tooltip
+                // mover; the reticle and the tooltip live on the same HUD
+                // canvas, so one tuning knob covers both.
+                const float s = g_tooltipFollowScale.load(std::memory_order_relaxed);
+                dx *= s;
+                dy *= s;
+            }
+            // UE5 LWC: FVector2D = 2 doubles - see the layout note in
+            // DriveTooltipMove.
+            struct { double X; double Y; char pad[16]; } tr{};
+            tr.X = static_cast<double>(dx);
+            tr.Y = static_cast<double>(dy);
             for (const ReticleWidget& w : widgets) {
+                if (!w.IsContainer) continue;
                 if (!ReticleWidgetLive(w)) continue;
                 SafeProcessEvent(reinterpret_cast<void*>(w.Obj),
-                                 reinterpret_cast<void*>(setOp), &op);
+                                 reinterpret_cast<void*>(setTr), &tr);
             }
         }
 
         // Per gameplay frame: drag the interaction tooltip to the body-forward
-        // reticle by writing its RenderTransform.Translation. The reticle overlay
-        // publishes the offset (backbuffer px from centre) it already projects
-        // each frame; we scale it to slate units and push it through
-        // SetRenderTranslation. When no reticle is drawn (tracking off / aim
-        // behind view) the offset is (0,0), recentring the prompt - so toggling
-        // tracking off mid-gameplay snaps the tooltip cleanly back to centre.
+        // reticle by writing its RenderTransform.Translation. AimProjection
+        // publishes the offset (client px from centre) it projects each frame;
+        // we scale it to slate units and push it through SetRenderTranslation.
+        // When no valid offset exists (tracking off / aim behind view) the
+        // offset is (0,0), recentring the prompt - so toggling tracking off
+        // mid-gameplay snaps the tooltip cleanly back to centre.
         void DriveTooltipMove() {
             if (!g_tooltipMoveOn.load(std::memory_order_relaxed)) return;
             const std::uintptr_t setTr = g_setRenderTranslationFn.load();
@@ -1365,7 +1384,7 @@ namespace Subnautica2HeadTracking
                 if (!g_processEvent) return;
             }
             float dx = 0.0f, dy = 0.0f;
-            const bool haveOffset = ReticleOverlay::GetScreenOffset(dx, dy);
+            const bool haveOffset = AimProjection::GetScreenOffset(dx, dy);
             float rawX = dx, rawY = dy;
             if (haveOffset) {
                 const float s = g_tooltipFollowScale.load(std::memory_order_relaxed);
@@ -1626,13 +1645,12 @@ namespace Subnautica2HeadTracking
 
             const bool inGameplay = InGameplay(reinterpret_cast<std::uintptr_t>(self));
 
-            // Suppress the game's own crosshair only during gameplay - never
-            // touch widget opacity in menus/PDA where the reticle isn't ours
-            // to hide.
-            if (inGameplay) {
-                DriveReticleMove();
-                DriveTooltipMove();
-            }
+            // Run the widget movers every call, not just in gameplay: outside
+            // gameplay the published offset is invalid, so both push (0,0) -
+            // which is what snaps the reticle and tooltip back to their vanilla
+            // positions when the player opens the PDA / pauses mid-head-turn.
+            DriveReticleMove();
+            DriveTooltipMove();
 
             // Cache the live Pawn pointer for the mask isolator + comp.
             {
@@ -1646,25 +1664,6 @@ namespace Subnautica2HeadTracking
             g_origGetPlayerViewPoint(self, outLocation, outRotation);
             const FVector postLoc = *outLocation;
             const FRotator postOrig = *outRotation;
-
-            // Defer the D3D12 overlay install until the game has fully
-            // spun up. Doing it from the bootstrap thread caught
-            // kiero::init returning a failure (no usable D3D12 device
-            // yet). Same call-count gate as the harvest works.
-            static std::atomic<bool> s_overlayTried{false};
-            if (g_hookCallCount.load(std::memory_order_relaxed) > 500
-                && !s_overlayTried.exchange(true))
-            {
-                // Log before the call so if kiero/D3D12 hooking crashes
-                // inside cameraunlock's DX12Overlay, we have a clear "we
-                // were about to install" marker. The OK/FAILED line fires
-                // after install returns.
-                Log::Line("reticle-overlay: starting D3D12 install "
-                          "(hookCount=%llu)",
-                    static_cast<unsigned long long>(
-                        g_hookCallCount.load(std::memory_order_relaxed)));
-                ReticleOverlay::Install();
-            }
 
             // Mask candidate (re-)harvest. Runs once we have a stable
             // post-spawn camera loc, then again whenever the Pawn pointer
@@ -1749,10 +1748,11 @@ namespace Subnautica2HeadTracking
 
             // Suppress tracking outside gameplay (main menu, PDA, pause): leave
             // outRotation/outLocation untouched so the rendered view uses the
-            // game's clean rotation, and hide our reticle.
+            // game's clean rotation, and invalidate the aim offset so the
+            // widget movers recenter the reticle and tooltip.
             if (!g_trackingEnabled.load(std::memory_order_relaxed) || !g_receiver
                 || !inGameplay) {
-                ReticleOverlay::UpdateAim(0.0, 0.0, 0.0, 1.0, false);
+                AimProjection::UpdateAim(0.0, 0.0, 0.0, 1.0, false);
                 return;
             }
 
@@ -1767,15 +1767,15 @@ namespace Subnautica2HeadTracking
                 // callers; without this, g_aimActive stays at the false it
                 // got during the death-screen frames and the reticle never
                 // comes back even once the renderer caller resumes.
-                ReticleOverlay::SetActive(true);
+                AimProjection::SetActive(true);
                 return;
             }
 
             float yaw = 0.0f, pitch = 0.0f, roll = 0.0f;
             if (!GetProcessedRotation(yaw, pitch, roll)) {
-                // No fresh tracker data - hide the reticle explicitly so we
-                // don't leak a stale active=true from the previous frame.
-                ReticleOverlay::UpdateAim(0.0, 0.0, 0.0, 1.0, false);
+                // No fresh tracker data - invalidate the offset explicitly so
+                // we don't leak a stale active=true from the previous frame.
+                AimProjection::UpdateAim(0.0, 0.0, 0.0, 1.0, false);
                 return;
             }
 
@@ -1818,15 +1818,15 @@ namespace Subnautica2HeadTracking
             }
             const FQuat4d H = QuatMul(viewQ, QuatInv(baseQ));
 
-            // Feed the reticle overlay the aim-vs-view relative rotation so it
-            // can project the clean-aim crosshair into the tracked view. The
+            // Feed the projector the aim-vs-view relative rotation so it can
+            // project the clean-aim crosshair into the tracked view. The
             // clean aim is the base (mouse/controller) direction; the reticle
             // moves to wherever that direction lands in the head-tracked frame.
             const FQuat4d qrel = QuatMul(QuatInv(viewQ), baseQ);
-            ReticleOverlay::UpdateAim(qrel.X, qrel.Y, qrel.Z, qrel.W,
-                                      inGameplay);
+            AimProjection::UpdateAim(qrel.X, qrel.Y, qrel.Z, qrel.W,
+                                     inGameplay);
 
-            // Feed the overlay the engine's live FOV so the reticle projection
+            // Feed the projector the engine's live FOV so the reticle projection
             // tracks the player's FOV slider instead of a hardcoded value. On
             // the render path, GPV's out-params are the Location/Rotation fields
             // of the FMinimalViewInfo this caller is assembling (confirmed in
@@ -1843,7 +1843,7 @@ namespace Subnautica2HeadTracking
                                         fovBits)) {
                         float fovDeg = 0.0f;
                         std::memcpy(&fovDeg, &fovBits, sizeof(fovDeg));
-                        ReticleOverlay::SetFovDegrees(fovDeg);
+                        AimProjection::SetFovDegrees(fovDeg);
                         static std::atomic<bool> s_fovLogged{false};
                         if (!s_fovLogged.exchange(true)) {
                             Log::Line("reticle FOV: live FMinimalViewInfo.FOV = "
@@ -2919,10 +2919,6 @@ namespace Subnautica2HeadTracking
 
             CreateThread(nullptr, 0, ReticleCollectorThread, nullptr, 0, nullptr);
 
-            // ReticleOverlay::Install() is deferred to the first hook call -
-            // installing from this bootstrap thread runs too early in the
-            // game's process to find a usable D3D12 device.
-
             Log::Line("Awaiting OpenTrack packets on UDP 4242");
             Log::Line("===== bootstrap complete =====");
             return 0;
@@ -2936,7 +2932,6 @@ namespace Subnautica2HeadTracking
 
     void Shutdown()
     {
-        ReticleOverlay::Remove();
         cameraunlock::hooks::HookManager::Instance().Shutdown();
         if (g_receiver) {
             g_receiver->Stop();

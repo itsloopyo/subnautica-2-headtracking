@@ -4,8 +4,8 @@
 // dxgi.dll proxy. Each export here is a forwarder to the matching symbol in
 // dxgi_orig.dll - a copy of the user's C:\Windows\System32\dxgi.dll planted
 // next to the game exe by install.cmd. The Windows loader resolves forwarders
-// at LoadLibrary time, so the game (and our own kiero/ImGui DXGI imports)
-// transparently reach the real DXGI through us.
+// at LoadLibrary time, so the game transparently reaches the real DXGI
+// through us.
 //
 // Re-derive the export list with `dumpbin /EXPORTS %SystemRoot%\System32\dxgi.dll`
 // after a Windows feature update if a new symbol appears; missing forwarders
