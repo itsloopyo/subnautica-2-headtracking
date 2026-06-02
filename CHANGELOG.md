@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1] - 2026-06-02
+
+### Other
+
+- Config: read full HeadTracking.ini in C++, default dev hotkeys off, dedup reticle/tooltip writes
+- powershell: write state file BOM-less so Lopari JSON parser accepts it
+
 ## [0.3.0] - 2026-06-02
 
 ### Added
