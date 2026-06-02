@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.3.0] - 2026-06-02
+
+### Added
+
+- add HeadTrackingSession and expand C++ core with RE Engine, Unreal, and tracking-session modules
+
+### Fixed
+
+- fail fast in ASI dev-deploy when the game is running
+
+### Other
+
+- SN2 patch watch: record buildid 23446003 [skip ci]
+- reframework: strip VR runtime DLLs on install for flatscreen mode
+- reframework: cache GetValue method and avoid per-call heap in ArrayGetValue; data: add BioShock Infinite
+- uninstall: remove reframework_revision.txt marker dropped at game root
+- install: render MOD_CONTROLS multi-line via percent expansion
+- Add YAPYAP to games.json
+- Consume shared infrastructure from cameraunlock-core
+- Replace DX12 reticle overlay with native-reticle widget move
+- Reticle move: target image widgets, add write/stomp diagnostics
+- Aim projection: calibrate scale from game WorldToScreen, divide by UMG DPI
+
 ## [0.2.3] - 2026-06-02
 
 ### Other
