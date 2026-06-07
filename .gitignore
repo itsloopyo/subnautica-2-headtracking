@@ -29,6 +29,7 @@ CLAUDE.md
 NEXUS_MODS.md
 skills/
 .mcp/
+.mcp.json
 mcp.json
 mcp*.json
 
