@@ -47,6 +47,16 @@ Copy-Item $marks -Destination (Join-Path $staging "plugins/Subnautica2HeadTracki
 # shouldn't mutate cameraunlock-core as a side effect.
 Copy-SharedBundle -StagingDir $staging -NoRefresh
 
+# Launcher manifest: the contract Lopari ingests. The launcher reads exactly
+# this filename (deploy/manifest.rs: MANIFEST_FILE = "launcher-manifest.json")
+# from the installer ZIP root. delivery_mode is "manifest"; Lopari anchors the
+# proxy and config files next to the resolved game executable (Win64 or WinGDK).
+$manifest = Join-Path $projectDir "launcher-manifest.json"
+if (-not (Test-Path $manifest)) {
+    throw "launcher-manifest.json not found at project root. The launcher manifest must ship in the installer ZIP."
+}
+Copy-Item $manifest -Destination $staging
+
 foreach ($doc in "README.md","LICENSE","CHANGELOG.md","THIRD-PARTY-NOTICES.md") {
     $p = Join-Path $projectDir $doc
     if (Test-Path $p) { Copy-Item $p -Destination $staging }

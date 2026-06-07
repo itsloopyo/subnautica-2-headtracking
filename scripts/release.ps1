@@ -56,6 +56,17 @@ if ($installContent -notmatch '(?m)^set "MOD_VERSION=[0-9]+\.[0-9]+\.[0-9]+"') {
 $installContent = $installContent -replace '(?m)^(set "MOD_VERSION=)[0-9]+\.[0-9]+\.[0-9]+(")', "`${1}$newVersion`${2}"
 $installContent | Set-Content $installCmdPath -NoNewline
 
+# 3c. Mirror the bump into launcher-manifest.json's mod_info.version so the
+#     manifest shipped in the ZIP always matches the released tag. Same
+#     canonical source (pixi.toml); this is a derived copy kept in lockstep.
+$manifestPath = Join-Path $projectDir "launcher-manifest.json"
+$manifestContent = Get-Content $manifestPath -Raw
+if ($manifestContent -notmatch '(?m)^\s*"version"\s*:\s*"[0-9]+\.[0-9]+\.[0-9]+"') {
+    throw "No version field found in $manifestPath"
+}
+$manifestContent = $manifestContent -replace '(?m)^(\s*"version"\s*:\s*")[0-9]+\.[0-9]+\.[0-9]+(")', "`${1}$newVersion`${2}"
+$manifestContent | Set-Content $manifestPath -NoNewline
+
 # 4. Release-config build.
 Write-Host "Building release..." -ForegroundColor Cyan
 pixi run build
@@ -66,7 +77,7 @@ New-ChangelogFromCommits -ChangelogPath $changelogPath -Version $newVersion | Ou
 
 # 6. Commit the version bump + changelog. "Release v..." matches the
 #    build.yml skip guard so CI doesn't double-build this commit.
-git add $pixiPath $changelogPath $installCmdPath
+git add $pixiPath $changelogPath $installCmdPath $manifestPath
 if ($LASTEXITCODE -ne 0) { throw "git add failed." }
 git commit -m "Release v$newVersion"
 if ($LASTEXITCODE -ne 0) { throw "git commit failed." }

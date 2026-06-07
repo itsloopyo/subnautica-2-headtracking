@@ -1,0 +1,45 @@
+{
+  "schema_version": 2,
+  "mod_info": {
+    "name": "Subnautica2HeadTracking",
+    "version": "0.3.1",
+    "game_id": "subnautica-2"
+  },
+  "strategy": "Shim",
+  "delivery_mode": "manifest",
+
+  "loader": {
+    "archives": [],
+    "detect": [],
+    "seed": [
+      {
+        "target": "HeadTracking.ini",
+        "anchor": "exe_dir",
+        "content_b64": "OyBTdWJuYXV0aWNhIDIgSGVhZCBUcmFja2luZyAtIGNvbmZpZ3VyYXRpb24KCltOZXR3b3JrXQpQb3J0ID0gNDI0MgoKW1RyYWNraW5nXQpFbmFibGVPblN0YXJ0dXAgPSB0cnVlCllhd1NlbnNpdGl2aXR5ID0gMS4wClBpdGNoU2Vuc2l0aXZpdHkgPSAxLjAKUm9sbFNlbnNpdGl2aXR5ID0gMS4wCkludmVydFlhdyA9IGZhbHNlCkludmVydFBpdGNoID0gZmFsc2UKSW52ZXJ0Um9sbCA9IGZhbHNlCjsgMC4wIC0gMS4wLiBIaWdoZXIgPSBzdGVhZGllciBidXQgbGFnZ2llciB2aWV3LiBBIGJhc2VsaW5lIG9mIDAuMTUgaXMgYWx3YXlzCjsgYXBwbGllZCBpbnRlcm5hbGx5LCBzbyAwLjAgc3RpbGwgZ2V0cyBsaWdodCBzbW9vdGhpbmc7IHJhaXNlIHRoaXMgaWYgeW91cgo7IHRyYWNrZXIgaXMgaml0dGVyeSAoZWcgYSBwaG9uZSBhcHAgb3ZlciBXaUZpKS4KU21vb3RoaW5nID0gMC4wCjsgdHJ1ZSA9IHRoZSBnYW1lJ3MgcmV0aWNsZSBmb2xsb3dzIHlvdXIgYWltIHBvaW50IHdoaWxlIHlvdXIgaGVhZCBpcyB0dXJuZWQuCjsgZmFsc2UgPSB0aGUgcmV0aWNsZSBzdGF5cyBhdCBzY3JlZW4gY2VudHJlICh2YW5pbGxhIGJlaGF2aW91cikuClNob3dSZXRpY2xlID0gdHJ1ZQo7IFlhdyBtb2RlOiB0cnVlID0gaG9yaXpvbi1sb2NrZWQgeWF3IChkZWZhdWx0KSwgZmFsc2UgPSBjYW1lcmEtbG9jYWwKV29ybGRTcGFjZVlhdyA9IHRydWUKCltUb29sdGlwXQo7IERyYWcgdGhlIGludGVyYWN0aW9uIHByb21wdCAoImhvdmVyIGFuIGludGVyYWN0YWJsZSIpIHRvIHRoZSBib2R5LWZvcndhcmQKOyByZXRpY2xlIHNvIGl0IHNpdHMgd2hlcmUgeW91IGFyZSBhaW1pbmcsIG5vdCBhdCB0aGUgaGVhZC10cmFja2VkIHZpZXcgY2VudHJlLgo7IFBlci1mcmFtZSBnYXRlZCBvbiBXQlBfSG92ZXJUYXJnZXRJbmZvJ3MgVGV4dEJsb2NrX09iZWN0TmFtZSB2aXNpYmlsaXR5Ogo7IHdvcmxkLWhvdmVyIGNvbnRleHQgZm9sbG93cyB0aGUgcmV0aWNsZTsgZXF1aXBwZWQtaXRlbSBhY3Rpb24gcHJvbXB0cwo7IChhaXIgYmxhZGRlciBJbmhhbGUvQXNjZW5kIGV0Yykgc3RheSBmaXhlZCBiZWNhdXNlIHRoZWlyIGNoaWxkIHRleHQgYmxvY2sKOyBpcyBjb2xsYXBzZWQuCkZvbGxvd1JldGljbGUgPSB0cnVlCjsgQmFja2J1ZmZlciBwaXhlbHMgLT4gVU1HIHNsYXRlIHVuaXRzIGZvciB0aGUgcHJvbXB0J3MgcmVuZGVyIHRyYW5zZm9ybS4gMS4wCjsgbWF0Y2hlcyB0aGUgcmV0aWNsZSAxOjEgb24gU04yIChvbmUgc2xhdGUgdW5pdCBwZXIgYmFja2J1ZmZlciBwaXhlbCBmb3IgdGhlCjsgd29ybGQtaGludCB3aWRnZXQpLiBBZGp1c3Qgb25seSBpZiB0aGUgcHJvbXB0IG92ZXItIG9yIHVuZGVyc2hvb3RzIHRoZQo7IHJldGljbGUgYXQgeW91ciByZXNvbHV0aW9uOyBsb3dlciA9IHNsb3dlciwgaGlnaGVyID0gZmFzdGVyLgpGb2xsb3dTY2FsZSA9IDEuMAoKW1Bvc2l0aW9uXQpFbmFibGVkID0gdHJ1ZQpTZW5zaXRpdml0eVggPSAxLjAKU2Vuc2l0aXZpdHlZID0gMS4wClNlbnNpdGl2aXR5WiA9IDEuMApJbnZlcnRYID0gdHJ1ZQpJbnZlcnRZID0gZmFsc2UKSW52ZXJ0WiA9IHRydWUKTGltaXRYID0gMC4zMApMaW1pdFkgPSAwLjIwCjsgWiBsaW1pdHMgc3dhcHBlZCBiZWNhdXNlIEludmVydFo9dHJ1ZTogd2l0aCBpbnZlcnNpb24sIGZvcndhcmQgPSAreiAodGhlCjsgbGltaXRfel9iYWNrIGJvdW5kKSBhbmQgYmFja3dhcmQgPSAteiAodGhlIGxpbWl0X3ogYm91bmQpLiBLZWVwaW5nIGZvcndhcmQKOyBnZW5lcm91cyAoMC40MCkgYW5kIGJhY2t3YXJkIHJlc3RyaWN0ZWQgKDAuMTApIG1lYW5zIExpbWl0WkJhY2sgaG9sZHMgdGhlCjsgZ2VuZXJvdXMgdmFsdWUgaGVyZS4KTGltaXRaID0gMC4xMApMaW1pdFpCYWNrID0gMC40MApTbW9vdGhpbmcgPSAwLjE1CgpbSG90a2V5c10KOyBSZWNlbnRlciAoSG9tZSksIHRvZ2dsZSB0cmFja2luZyAoRW5kKSwgYW5kIGN5Y2xlIHRyYWNraW5nIG1vZGUgKFBhZ2UgVXApCjsgYXJlIGZpeGVkLCBlYWNoIGFsc28gcmVhY2hhYmxlIHdpdGggYSBDdHJsK1NoaWZ0IGNob3JkLiBPbmx5IHRoZSB5YXctbW9kZQo7IHRvZ2dsZSBpcyByZWJpbmRhYmxlIGhlcmUuIFZLIGNvZGU6IFBhZ2VEb3duID0gMHgyMi4KVG9nZ2xlWWF3TW9kZSA9IDB4MjIK"
+      },
+      {
+        "target": "Subnautica2HeadTracking.marks.txt",
+        "anchor": "exe_dir",
+        "content_b64": "cjA8cGF3bisweDg1OD4JMHgyNTAKcjA8cGF3bisweDg1OD4JMHgyNTgKcjA8cGF3bisweDg1OD4JMHgyNjAKcjA8cGF3bisweDg1OD4JMHgyNjgKcjA8cGF3bisweDg1OD4JMHgyNzAK"
+      }
+    ]
+  },
+
+  "files": [
+    { "source": "plugins/dxgi.dll", "target": "dxgi.dll", "anchor": "exe_dir", "backup": true }
+  ],
+
+  "runtime_requirements": [
+    {
+      "id": "dxgi-proxy-original",
+      "type": "system-file-copy",
+      "source": "%WINDIR%/System32/dxgi.dll",
+      "target": "dxgi_orig.dll",
+      "anchor": "exe_dir",
+      "required": true,
+      "reason": "The mod ships as a dxgi.dll proxy planted next to the game exe. The real Windows dxgi.dll must be captured alongside it as dxgi_orig.dll so the proxy can forward every DXGI export to it; without it the game cannot create its swapchain and fails to launch. The file is not redistributable, so it is captured from the user's own System32 at install time."
+    }
+  ],
+
+  "dependencies": []
+}

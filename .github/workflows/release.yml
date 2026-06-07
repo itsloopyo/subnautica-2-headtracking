@@ -1,4 +1,5 @@
 name: Release
+run-name: "Release ${{ github.ref_name }}"
 
 on:
   push:
@@ -10,11 +11,13 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
+
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout code
+        uses: actions/checkout@v6
         with:
-          submodules: recursive
           fetch-depth: 0
+          submodules: recursive
 
       - name: Extract version from tag
         shell: pwsh
@@ -41,20 +44,17 @@ jobs:
           }
           Write-Host "Version $fileVersion matches tag"
 
-      - name: Configure CMake
-        run: cmake -B build -G "Visual Studio 17 2022" -A x64
+      # C++ toolchain for the pixi `package` task's cmake/msbuild build.
+      - name: Setup Visual Studio environment
+        uses: microsoft/setup-msbuild@v3
 
-      - name: Build Release
-        run: cmake --build build --config Release
+      - name: Setup pixi
+        uses: prefix-dev/setup-pixi@v0.8.1
 
-      - name: Package release artifacts
+      # Same command as build.yml and developers run - no build logic in YAML.
+      - name: Build and package
         shell: pwsh
-        run: |
-          powershell -ExecutionPolicy Bypass -File scripts/package-release.ps1
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::error::Packaging failed"
-            exit 1
-          }
+        run: pixi run package
 
       - name: Generate release notes
         shell: pwsh

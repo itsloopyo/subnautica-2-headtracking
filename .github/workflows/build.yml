@@ -16,65 +16,55 @@ on:
 
 jobs:
   build:
-    if: ${{ !startsWith(github.event.head_commit.message, 'Release v') }}
+    name: Build and Validate
     runs-on: windows-latest
-    permissions:
-      contents: read
+    if: ${{ !startsWith(github.event.head_commit.message, 'Release v') }}
+
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout code
+        uses: actions/checkout@v6
         with:
           submodules: recursive
 
-      - name: Configure CMake
-        run: cmake -B build -G "Visual Studio 17 2022" -A x64
+      # C++ toolchain for the pixi `package` task's cmake/msbuild build.
+      - name: Setup Visual Studio environment
+        uses: microsoft/setup-msbuild@v3
 
-      - name: Build Release
-        run: cmake --build build --config Release
+      - name: Setup pixi
+        uses: prefix-dev/setup-pixi@v0.8.1
 
-      - name: Verify build outputs
+      # Build + package through the SAME command a developer runs locally. All
+      # build logic lives in the pixi task chain (cmake configure -> build ->
+      # package); the workflow owns none, so local and CI can't drift.
+      - name: Build and package
         shell: pwsh
-        run: |
-          $dxgi = "build/Release/dxgi.dll"
-          if (-not (Test-Path $dxgi)) {
-            Write-Host "::error::Missing build artifact: $dxgi"
-            exit 1
-          }
-          Write-Host "Build outputs:"
-          Get-ChildItem build/Release | Format-Table Name, Length
+        run: pixi run package
 
-      - name: Package installer
-        shell: pwsh
-        run: |
-          powershell -ExecutionPolicy Bypass -File scripts/package-release.ps1
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::error::Packaging failed"
-            exit 1
-          }
-
+      # Unzip the installer so upload-artifact doesn't nest a zip in its zip.
       - name: Stage installer contents for artifact upload
         shell: pwsh
         run: |
-          $installer = Get-ChildItem release/*-installer.zip | Select-Object -First 1
-          if (-not $installer) {
-            Write-Host "::error::No installer ZIP found in release/"
+          $zip = Get-ChildItem release/*-installer.zip -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $zip) {
+            Write-Host "::error::No installer ZIP was produced by 'pixi run package'"
             exit 1
           }
           $dest = "release/artifact-contents"
-          if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
-          New-Item -ItemType Directory -Path $dest | Out-Null
-          Expand-Archive -Path $installer.FullName -DestinationPath $dest -Force
+          New-Item -ItemType Directory -Path $dest -Force | Out-Null
+          Expand-Archive -Path $zip.FullName -DestinationPath $dest -Force
+          Write-Host "Staged $($zip.Name)" -ForegroundColor Green
 
       - name: Compute artifact name from ref
+        id: artifact
         shell: pwsh
         run: |
-          $branch = if ($env:GITHUB_HEAD_REF) { $env:GITHUB_HEAD_REF } else { $env:GITHUB_REF_NAME }
-          $sanitized = $branch -replace '[^A-Za-z0-9._-]', '-'
-          "ARTIFACT_NAME=Subnautica2HeadTracking-$sanitized" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $branch = "${{ github.ref_name }}" -replace '[^A-Za-z0-9._-]', '-'
+          echo "name=Subnautica2HeadTracking-$branch" >> $env:GITHUB_OUTPUT
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ env.ARTIFACT_NAME }}
+          name: ${{ steps.artifact.outputs.name }}
           path: release/artifact-contents/
           retention-days: 14
           if-no-files-found: error
