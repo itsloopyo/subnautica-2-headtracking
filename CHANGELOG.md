@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.3.2] - 2026-06-07
+
+### Added
+
+- aim projection, reframework/unreal hooks, input/logging hardening, games
+- add Mass Effect Legendary Edition to games catalog
+- expand games catalog, fix unicode games.json read, stage launcher manifest
+- add Pacific Drive to games catalog
+- add Homeworld: Remastered Collection to games catalog
+- add manifest-mode installer validator and ASI loader subdir support
+- authenticate GitHub API requests via env token when present
+- add R.E.P.O. detection data
+
+### Fixed
+
+- restore il2cpp camera position by undoing applied local delta
+- set SO_REUSEADDR so the receiver reclaims its port on relaunch
+- harden release.ps1 - changelog gate before version bump, add -Force
+
+### Other
+
+- Remove orphaned ContainsCI test (migrated to cameraunlock-core)
+- powershell: stop redirecting git stderr in Invoke-VersionCommit
+
 ## [0.3.1] - 2026-06-02
 
 ### Other
