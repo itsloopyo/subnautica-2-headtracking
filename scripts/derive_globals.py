@@ -88,21 +88,46 @@ dec = masked_scan(DECODER_SIG)
 print("decoder sig:   %d hit(s): %s" % (len(dec), ", ".join("0x%08x" % x for x in dec)))
 fnamepool = None
 flag = None
-if len(dec) == 1:
-    for ins in disasm(dec[0], 0x80):
-        if ins.mnemonic == "lea" and ins.reg_name(ins.operands[0].reg) == "r8":
-            t = rip_target(ins)
-            if t:
-                fnamepool = t
-                print("  FNamePool lea @ fn+0x%x -> 0x%08x" % (ins.address - dec[0], t))
-                break
-    for ins in disasm(dec[0], 0x40):
-        if ins.mnemonic == "cmp" and ins.operands[0].type == X86_OP_MEM \
+
+
+def decode_pool(fn):
+    """Return (pool, init_flag) for one decoder, or (None, None)."""
+    pool = init_flag = None
+    for ins in disasm(fn, 0x80):
+        if pool is None and ins.mnemonic == "lea" \
+           and ins.reg_name(ins.operands[0].reg) == "r8":
+            pool = rip_target(ins)
+        if init_flag is None and ins.mnemonic == "cmp" \
+           and ins.operands[0].type == X86_OP_MEM \
            and ins.operands[0].mem.base == X86_REG_RIP:
-            flag = rip_target(ins)
-            print("  FName init flag @ fn+0x%x -> 0x%08x  (pool-flag=0x%x)"
-                  % (ins.address - dec[0], flag, (fnamepool - flag) if fnamepool else 0))
+            init_flag = rip_target(ins)
+        if pool is not None and init_flag is not None:
             break
+    return pool, init_flag
+
+
+# The signature matches every FName decoder variant the build emits (narrow /
+# wide), so multiple hits are expected. Each must agree on the pool and satisfy
+# pool - init_flag == 0x267; a disagreement means the signature has drifted onto
+# unrelated code and the result must not be trusted.
+pools = set()
+for fn in dec:
+    pool, init_flag = decode_pool(fn)
+    ok = pool is not None and init_flag is not None and pool - init_flag == 0x267
+    print("  fn 0x%08x: pool=%s flag=%s %s"
+          % (fn,
+             ("0x%08x" % pool) if pool else "?",
+             ("0x%08x" % init_flag) if init_flag else "?",
+             "(pool-flag=0x267 OK)" if ok else "(INVARIANT FAILED - ignored)"))
+    if ok:
+        pools.add(pool)
+        flag = init_flag
+
+if len(pools) == 1:
+    fnamepool = pools.pop()
+elif len(pools) > 1:
+    raise SystemExit("decoders disagree on FNamePool: %s - signature has drifted"
+                     % ", ".join("0x%08x" % p for p in sorted(pools)))
 
 print()
 print("=== RESULT ===")
