@@ -13,6 +13,17 @@ jobs:
       contents: write
 
     steps:
+      - name: Require Discord release webhook
+        shell: pwsh
+        env:
+          DISCORD_RELEASE_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+        run: |
+          if (-not $env:DISCORD_RELEASE_WEBHOOK) {
+            Write-Host "::error::DISCORD_RELEASE_WEBHOOK secret is not set - every release must be announced to Discord, so this run is refused before the release is created. Set it with 'gh secret set DISCORD_RELEASE_WEBHOOK --repo ${{ github.repository }}' and re-run."
+            exit 1
+          }
+          Write-Host "Discord release webhook is configured."
+
       - name: Checkout code
         uses: actions/checkout@v6
         with:
@@ -98,15 +109,15 @@ jobs:
           DISCORD_RELEASE_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
         run: |
           if (-not $env:DISCORD_RELEASE_WEBHOOK) {
-            Write-Host "::notice::DISCORD_RELEASE_WEBHOOK not set; skipping Discord announcement."
-            exit 0
+            Write-Host "::error::DISCORD_RELEASE_WEBHOOK secret is not set - the release was created but not announced. Set it with 'gh secret set DISCORD_RELEASE_WEBHOOK --repo ${{ github.repository }}' and re-run this job."
+            exit 1
           }
           $tag  = "${{ github.ref_name }}"
           $repo = "${{ github.repository }}"
           $name = (Get-Culture).TextInfo.ToTitleCase(((($repo -split '/')[-1]) -replace '-head-?tracking$','' -replace '-',' '))
           $url  = "https://github.com/$repo/releases/tag/$tag"
           $payload = @{
-            username = 'Loopy Releases'
+            username = 'Mod Releases'
             embeds   = @(@{
               title       = "$name Head Tracking $tag"
               url         = $url
