@@ -18,6 +18,7 @@ namespace Subnautica2HeadTracking::builds
     // `kStoreProfile_yyyymmdd` where the date is the build's release date
     // (or close approximation - the PE fingerprint is the authoritative key,
     // so the date is just for human readability).
+    extern const BuildProfile kSteamProfile_20260710;
     extern const BuildProfile kSteamProfile_20260601;
     extern const BuildProfile kSteamProfile_20260522;
     extern const BuildProfile kGdkProfile_20260602;
@@ -31,7 +32,8 @@ namespace Subnautica2HeadTracking::builds
         // build wins the diagnostic label, and Steam profiles before GDK
         // ones because Steam is the more common install. Add new entries to
         // the TOP of this array (after the diagnostic primary).
-        constexpr std::array<const BuildProfile*, 4> kKnownProfiles = {
+        constexpr std::array<const BuildProfile*, 5> kKnownProfiles = {
+            &kSteamProfile_20260710,
             &kSteamProfile_20260601,
             &kSteamProfile_20260522,
             &kGdkProfile_20260602,
