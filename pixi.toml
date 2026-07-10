@@ -1,6 +1,6 @@
 [workspace]
 name = "subnautica-2-head-tracking"
-version = "0.3.2"
+version = "0.4.0"
 description = "Head tracking mod for Subnautica 2 (UE5, Xbox/WinGDK) using CameraUnlock shared library"
 channels = ["conda-forge"]
 platforms = ["win-64"]

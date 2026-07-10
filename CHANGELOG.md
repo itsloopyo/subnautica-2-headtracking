@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.4.0] - 2026-07-10
+
+### Added
+
+- guard the .original backup against patched assemblies
+- let Write-DeploymentSuccess take a full -Controls list
+- announce new releases to Discord
+- announce dev pre-releases to Discord
+- require DISCORD_RELEASE_WEBHOOK before publishing dev builds
+- add steam-win64-20260710 build profile
+- add gdk-wingdk-20260710 build profile
+
+### Fixed
+
+- subscribe Camera.onPreCull via reflection for SRP-only Unity 6
+- accept multiple FName decoder hits in derive_globals
+- auto-discover mask group and compose from a clean baseline
+
+### Other
+
+- SN2 patch watch: record buildid 23922166 [skip ci]
+- Add Metaphor: ReFantazio to games.json; fix ASI install template (x86) path bug
+- Add Mirror's Edge, RV There Yet, Prey to games.json; add DX9 overlay header
+
 ## [0.3.2] - 2026-06-07
 
 ### Added
