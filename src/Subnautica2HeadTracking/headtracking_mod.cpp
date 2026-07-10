@@ -391,6 +391,16 @@ namespace Subnautica2HeadTracking
         std::atomic<std::uint64_t> g_maskAnomalyCount{0};
         std::atomic<std::uint64_t> g_maskForceAcceptCount{0};
 
+        // Auto-discovered mask group: (parentComp, childOff) pairs, re-derived
+        // every harvest by AutoDiscoverMaskGroup. This replaces the fragile
+        // marks-file path identifiers (r0<pawn+0xNNN>): the first-person mask
+        // rig is located by its structural signature each launch, so a game
+        // patch that shifts the pawn struct no longer silently breaks the comp.
+        // Indexed 0..N-1; that member index keys the dedup/clean/reject maps
+        // above and is stable within one discovery (cleared on re-discovery).
+        std::vector<std::pair<std::uintptr_t, std::size_t>> g_maskGroup;
+        std::mutex g_maskGroupMutex;
+
         // Mask measurement mode. When ON, we DO NOT write the mask - we read
         // each marked slot's engine-driven ComponentToWorld.Rotation per frame
         // and log its delta from a baseline captured when the mode was armed,
@@ -447,6 +457,102 @@ namespace Subnautica2HeadTracking
             return out;
         }
 
+        // Structurally locate the first-person mask/helmet rig and its mesh
+        // pieces with no saved offsets. The rig is the scene component sitting
+        // at the player's eye position whose ComponentToWorld children form a
+        // run of consecutive scene components (the mask mesh parts hang off the
+        // camera-mount component as sibling child pointers). That signature is
+        // fixed by the engine's component-class layout, not the pawn struct, so
+        // it survives the pawn-layout shifts a game patch introduces - which is
+        // exactly what silently broke the old (path,offset) marks file.
+        //
+        // Populates g_maskGroup with (parentComp, childOff) pairs and clears the
+        // per-member dedup/clean/reject state (member indices now map to freshly
+        // resolved components). Runs at the end of each harvest.
+        void AutoDiscoverMaskGroup(double px, double py, double pz)
+        {
+            std::vector<MaskCandidate> cands;
+            {
+                std::lock_guard<std::mutex> lk(g_maskMutex);
+                cands = g_maskCandidates;
+            }
+
+            auto isScene = [&](std::uintptr_t comp) -> bool {
+                if (!comp || comp < 0x10000) return false;
+                std::uintptr_t vt = 0;
+                if (!SafeReadPtr(comp, vt)) return false;
+                if (ue::ModuleBase() == 0 || vt < ue::ModuleBase()
+                    || vt >= ue::ModuleEnd()) return false;
+                return LooksLikeSceneComponent(comp, px, py, pz);
+            };
+
+            // Child-pointer scan window inside a component. The historical mask
+            // run sat at 0x250..0x270; this band covers it with margin so a
+            // class-layout shift is still caught.
+            constexpr std::size_t kScanLo = 0x100, kScanHi = 0x400, kStep = 8;
+            constexpr int    kMinRun     = 4;
+            constexpr double kParentNear = 1000.0;  // rig is at the eye position
+
+            std::uintptr_t bestParent = 0;
+            std::size_t    bestStart  = 0;
+            int            bestLen    = 0;
+            for (const auto& c : cands) {
+                FVector ploc{};
+                if (!SafeReadFVector(
+                        c.comp + Offsets().USceneComponentLayout.kComponentToWorldTranslation,
+                        ploc))
+                    continue;
+                if (std::abs(ploc.X - px) > kParentNear
+                    || std::abs(ploc.Y - py) > kParentNear
+                    || std::abs(ploc.Z - pz) > kParentNear) continue;
+
+                int run = 0;
+                std::size_t runStart = 0;
+                for (std::size_t off = kScanLo; off < kScanHi; off += kStep) {
+                    std::uintptr_t child = 0;
+                    SafeReadPtr(c.comp + off, child);
+                    if (isScene(child)) {
+                        if (run == 0) runStart = off;
+                        ++run;
+                        if (run > bestLen) {
+                            bestLen = run;
+                            bestStart = runStart;
+                            bestParent = c.comp;
+                        }
+                    } else {
+                        run = 0;
+                    }
+                }
+            }
+
+            std::vector<std::pair<std::uintptr_t, std::size_t>> group;
+            if (bestParent && bestLen >= kMinRun) {
+                for (int k = 0; k < bestLen; ++k)
+                    group.emplace_back(
+                        bestParent, bestStart + static_cast<std::size_t>(k) * kStep);
+            }
+
+            {
+                std::lock_guard<std::mutex> lk(g_maskGroupMutex);
+                g_maskGroup = group;
+            }
+            {
+                std::lock_guard<std::mutex> lk(g_lastWrittenMutex);
+                g_lastWrittenBySlot.clear();
+                g_lastCleanE.clear();
+                g_rejectStreakBySlot.clear();
+            }
+            if (!group.empty()
+                && !g_disableMaskComp.load(std::memory_order_relaxed))
+                g_maskCompEnabled.store(true);
+
+            Log::Line("mask-autodiscover: parent=0x%llx run=%d @ +0x%zx..+0x%zx  "
+                      "group=%zu  comp=%s",
+                static_cast<unsigned long long>(bestParent), bestLen, bestStart,
+                bestStart + (bestLen ? static_cast<std::size_t>(bestLen - 1) * kStep : 0),
+                group.size(), g_maskCompEnabled.load() ? "ON" : "OFF");
+        }
+
 
         // true  = world-space yaw (default; horizon-locked, FRotator additive
         // path). Yaw rotates around world up regardless of pitch, so "up" is a
@@ -471,103 +577,109 @@ namespace Subnautica2HeadTracking
             const FQuat4d Hinv = QuatInv(H);
             const int     mode = g_maskCompMode.load(std::memory_order_relaxed);
 
-            std::vector<MaskCandidate> snap;
+            std::vector<std::pair<std::uintptr_t, std::size_t>> group;
             {
-                std::lock_guard<std::mutex> lk(g_maskMutex);
-                snap = g_maskCandidates;
+                std::lock_guard<std::mutex> lk(g_maskGroupMutex);
+                group = g_maskGroup;
             }
-            const int total = static_cast<int>(snap.size());
-            std::vector<int> members = ResolveMaskMarkSlots();
+            const int total = static_cast<int>(group.size());
 
             int wrote = 0;
-            for (int i : members) {
-                if (i < 0 || i >= total) continue;
+            int skipNull = 0, skipRead = 0, skipWrite = 0, reassert = 0;
+            for (int i = 0; i < total; ++i) {
                 std::uintptr_t comp = 0;
-                SafeReadPtr(snap[i].srcObj + snap[i].srcOff, comp);
-                if (!comp) continue;
+                SafeReadPtr(group[i].first + group[i].second, comp);
+                if (!comp) { ++skipNull; continue; }
                 const std::uintptr_t rotTarget =
                     comp + Offsets().USceneComponentLayout.kComponentToWorldRotation;
                 const std::uintptr_t locTarget =
                     comp + Offsets().USceneComponentLayout.kComponentToWorldTranslation;
                 FQuat4d oldRot{0, 0, 0, 1};
                 FVector oldLoc{};
-                if (!SafeReadFQuat(rotTarget, oldRot)) continue;
-                if (!SafeReadFVector(locTarget, oldLoc)) continue;
+                if (!SafeReadFQuat(rotTarget, oldRot)) { ++skipRead; continue; }
+                if (!SafeReadFVector(locTarget, oldLoc)) { ++skipRead; continue; }
 
-                // Same-frame de-dup. If what we read matches what we last
-                // wrote for this slot, the engine hasn't refreshed the
-                // transform since - skip to avoid H-stacking per frame.
+                // Resolve this member's CLEAN (engine-authored) transform, then
+                // compose the CURRENT head rotation onto it. The render caller
+                // fires ~4x/frame and the engine re-drives ComponentToWorld on
+                // its own schedule; composing H onto whatever is in memory would
+                // stack H across those calls, and simply skipping when memory
+                // still holds our previous write froze the mask at the first
+                // frame's pose (the bug this replaces). Keeping a per-member
+                // clean baseline and always re-applying the live H keeps the
+                // mask tracking continuously.
+                FQuat4d baseRot;
+                FVector baseLoc;
                 {
                     std::lock_guard<std::mutex> lk(g_lastWrittenMutex);
-                    auto it = g_lastWrittenBySlot.find(i);
-                    if (it != g_lastWrittenBySlot.end() && it->second.valid) {
-                        const auto& w = it->second;
+                    auto wit = g_lastWrittenBySlot.find(i);
+                    bool memoryIsOurs = false;
+                    if (wit != g_lastWrittenBySlot.end() && wit->second.valid) {
+                        const auto& w = wit->second;
                         const double drq =
-                            std::abs(w.rot.X - oldRot.X) +
-                            std::abs(w.rot.Y - oldRot.Y) +
-                            std::abs(w.rot.Z - oldRot.Z) +
-                            std::abs(w.rot.W - oldRot.W);
+                            std::abs(w.rot.X - oldRot.X) + std::abs(w.rot.Y - oldRot.Y) +
+                            std::abs(w.rot.Z - oldRot.Z) + std::abs(w.rot.W - oldRot.W);
                         const double dlv =
-                            std::abs(w.loc.X - oldLoc.X) +
-                            std::abs(w.loc.Y - oldLoc.Y) +
+                            std::abs(w.loc.X - oldLoc.X) + std::abs(w.loc.Y - oldLoc.Y) +
                             std::abs(w.loc.Z - oldLoc.Z);
-                        if (drq < 1e-6 && dlv < 1e-3) continue;
+                        memoryIsOurs = (drq < 1e-6 && dlv < 1e-3);
                     }
-                }
+                    auto cit = g_lastCleanE.find(i);
+                    const bool haveBaseline = (cit != g_lastCleanE.end());
 
-                // Reject transient garbage reads. A real player can't rotate the
-                // clean view >90 deg or move >1m in one frame, so a read that
-                // jumps that far from last frame's accepted value is a transient
-                // other-context write landing in ComponentToWorld. Comping it
-                // gives the rare single-frame "weird position"; instead re-assert
-                // last frame's good output and skip.
-                {
-                    std::lock_guard<std::mutex> lk(g_lastWrittenMutex);
-                    auto git = g_lastCleanE.find(i);
-                    if (git != g_lastCleanE.end()) {
-                        const FQuat4d& pg = git->second.first;
-                        const FVector& pl = git->second.second;
+                    if (memoryIsOurs && haveBaseline) {
+                        // Engine hasn't refreshed since our write - reuse the
+                        // stored clean baseline and re-apply the live H.
+                        baseRot = cit->second.first;
+                        baseLoc = cit->second.second;
+                    } else if (haveBaseline) {
+                        // Memory is a fresh engine value. Guard against transient
+                        // garbage writes from other render contexts: a jump too
+                        // large to be one frame of real motion is not clean, so
+                        // keep the previous baseline instead of adopting it.
+                        const FQuat4d& pg = cit->second.first;
+                        const FVector& pl = cit->second.second;
                         const double dot = std::abs(oldRot.X*pg.X + oldRot.Y*pg.Y
                                                   + oldRot.Z*pg.Z + oldRot.W*pg.W);
                         const double posJump = std::abs(oldLoc.X - pl.X)
                                              + std::abs(oldLoc.Y - pl.Y)
                                              + std::abs(oldLoc.Z - pl.Z);
-                        if (dot < 0.707 || posJump > 100.0) {
-                            const int streak = ++g_rejectStreakBySlot[i];
-                            if (streak <= kMaxRejects) {
-                                auto wit = g_lastWrittenBySlot.find(i);
-                                if (wit != g_lastWrittenBySlot.end() && wit->second.valid) {
-                                    SafeWriteFQuat(rotTarget, wit->second.rot);
-                                    SafeWriteFVector(locTarget, wit->second.loc);
-                                }
-                                const auto an = g_maskAnomalyCount.fetch_add(1, std::memory_order_relaxed) + 1;
-                                Log::Line("mask-anomaly #%llu slot=%d streak=%d dot=%.3f posJump=%.1f  badE=(%.2f,%.2f,%.2f) lastE=(%.2f,%.2f,%.2f) - reasserted",
-                                    static_cast<unsigned long long>(an), i, streak, dot, posJump,
-                                    oldLoc.X, oldLoc.Y, oldLoc.Z, pl.X, pl.Y, pl.Z);
-                                continue;
+                        const bool garbage = (dot < 0.707 || posJump > 100.0);
+                        if (garbage && ++g_rejectStreakBySlot[i] <= kMaxRejects) {
+                            baseRot = pg;
+                            baseLoc = pl;
+                            const auto an = g_maskAnomalyCount.fetch_add(1, std::memory_order_relaxed) + 1;
+                            Log::Line("mask-anomaly #%llu member=%d streak=%d dot=%.3f posJump=%.1f - held baseline",
+                                static_cast<unsigned long long>(an), i,
+                                g_rejectStreakBySlot[i], dot, posJump);
+                            ++reassert;
+                        } else {
+                            if (garbage) {
+                                const auto fa = g_maskForceAcceptCount.fetch_add(1, std::memory_order_relaxed) + 1;
+                                Log::Line("mask-force-accept #%llu member=%d dot=%.3f posJump=%.1f - re-anchoring",
+                                    static_cast<unsigned long long>(fa), i, dot, posJump);
                             }
-                            // Streak exhausted: the engine has genuinely moved
-                            // the player (load, teleport, vehicle hop) - accept
-                            // the new read and let g_lastCleanE catch up, else
-                            // the mask stays welded to the pre-move position
-                            // and renders off-screen.
-                            const auto fa = g_maskForceAcceptCount.fetch_add(1, std::memory_order_relaxed) + 1;
-                            Log::Line("mask-force-accept #%llu slot=%d streak=%d dot=%.3f posJump=%.1f - re-anchoring",
-                                static_cast<unsigned long long>(fa), i, streak, dot, posJump);
+                            baseRot = oldRot;
+                            baseLoc = oldLoc;
+                            g_lastCleanE[i] = {oldRot, oldLoc};
+                            g_rejectStreakBySlot[i] = 0;
                         }
+                    } else {
+                        // First sighting of this member: memory is clean.
+                        baseRot = oldRot;
+                        baseLoc = oldLoc;
+                        g_lastCleanE[i] = {oldRot, oldLoc};
                     }
-                    g_lastCleanE[i] = {oldRot, oldLoc};
-                    g_rejectStreakBySlot[i] = 0;
                 }
 
-                // Pick the rotation we'll apply this iteration.
+                // Compose the live head rotation onto the clean baseline.
                 FQuat4d newRot{};
                 FQuat4d pivotQ{};
                 switch (mode) {
-                    case 0: newRot = QuatMul(H,    oldRot); pivotQ = H;    break;
-                    case 1: newRot = QuatMul(oldRot, H);    pivotQ = H;    break;
-                    case 2: newRot = QuatMul(Hinv, oldRot); pivotQ = Hinv; break;
-                    case 3: newRot = QuatMul(oldRot, Hinv); pivotQ = Hinv; break;
+                    case 0: newRot = QuatMul(H,    baseRot); pivotQ = H;    break;
+                    case 1: newRot = QuatMul(baseRot, H);    pivotQ = H;    break;
+                    case 2: newRot = QuatMul(Hinv, baseRot); pivotQ = Hinv; break;
+                    case 3: newRot = QuatMul(baseRot, Hinv); pivotQ = Hinv; break;
                 }
 
                 // Rotate the world position around the CLEAN camera position
@@ -577,9 +689,9 @@ namespace Subnautica2HeadTracking
                 // camera's translation too (otherwise the position offset
                 // parallax-swings the mask far more than the head rotated).
                 FVector rel{
-                    oldLoc.X - cameraPos.X,
-                    oldLoc.Y - cameraPos.Y,
-                    oldLoc.Z - cameraPos.Z};
+                    baseLoc.X - cameraPos.X,
+                    baseLoc.Y - cameraPos.Y,
+                    baseLoc.Z - cameraPos.Z};
                 FVector newRel = QuatRotateVec(pivotQ, rel);
                 FVector newLoc{
                     cameraPos.X + newRel.X + posOffset.X,
@@ -592,13 +704,16 @@ namespace Subnautica2HeadTracking
                     ++wrote;
                     std::lock_guard<std::mutex> lk(g_lastWrittenMutex);
                     g_lastWrittenBySlot[i] = LastWritten{newRot, newLoc, true};
+                } else {
+                    ++skipWrite;
                 }
             }
 
             const auto n = g_maskCompLogCount.fetch_add(1, std::memory_order_relaxed) + 1;
             if (n == 1 || (n % 120) == 0) {
-                Log::Line("mask-comp on  mode=%d  wrote=%d/%zu  H=(P=%.2f Y=%.2f R=%.2f)  pivot=(%.1f, %.1f, %.1f)",
-                    mode, wrote, members.size(),
+                Log::Line("mask-comp on  mode=%d  wrote=%d/%d  skip(null=%d read=%d write=%d) reassert=%d  H=(P=%.2f Y=%.2f R=%.2f)  pivot=(%.1f, %.1f, %.1f)",
+                    mode, wrote, total,
+                    skipNull, skipRead, skipWrite, reassert,
                     pitchDeg, yawDeg, rollDeg,
                     cameraPos.X, cameraPos.Y, cameraPos.Z);
             }
@@ -615,22 +730,20 @@ namespace Subnautica2HeadTracking
                 g_maskDiagBaseline.clear();
             }
 
-            std::vector<MaskCandidate> snap;
+            std::vector<std::pair<std::uintptr_t, std::size_t>> group;
             {
-                std::lock_guard<std::mutex> lk(g_maskMutex);
-                snap = g_maskCandidates;
+                std::lock_guard<std::mutex> lk(g_maskGroupMutex);
+                group = g_maskGroup;
             }
-            const int total = static_cast<int>(snap.size());
-            const std::vector<int> members = ResolveMaskMarkSlots();
+            const int total = static_cast<int>(group.size());
 
             const FRotator hRot = QuatToRotator(H);
             const auto n = g_maskDiagLogCount.fetch_add(1, std::memory_order_relaxed) + 1;
             const bool doLog = (n == 1 || (n % 30) == 0);
 
-            for (int i : members) {
-                if (i < 0 || i >= total) continue;
+            for (int i = 0; i < total; ++i) {
                 std::uintptr_t comp = 0;
-                SafeReadPtr(snap[i].srcObj + snap[i].srcOff, comp);
+                SafeReadPtr(group[i].first + group[i].second, comp);
                 if (!comp) continue;
                 const std::uintptr_t rotTarget =
                     comp + Offsets().USceneComponentLayout.kComponentToWorldRotation;
@@ -657,14 +770,14 @@ namespace Subnautica2HeadTracking
                 const FQuat4d delta = QuatMul(cur, QuatInv(baseline));
                 const FRotator dRot = QuatToRotator(delta);
                 if (doLog) {
-                    Log::Line("mask-diag slot=%d (%s) headH=(Y=%.2f P=%.2f R=%.2f) maskDelta=(Y=%.2f P=%.2f R=%.2f)",
-                        i, DescribeMaskSlot(i).c_str(),
+                    Log::Line("mask-diag member=%d (0x%llx+0x%zx) headH=(Y=%.2f P=%.2f R=%.2f) maskDelta=(Y=%.2f P=%.2f R=%.2f)",
+                        i, static_cast<unsigned long long>(group[i].first), group[i].second,
                         hRot.Yaw, hRot.Pitch, hRot.Roll,
                         dRot.Yaw, dRot.Pitch, dRot.Roll);
                 }
             }
-            if (doLog && members.empty()) {
-                Log::Line("mask-diag: no marked slots (mark the mask with Ins+F11 first)");
+            if (doLog && total == 0) {
+                Log::Line("mask-diag: mask group not yet auto-discovered");
             }
         }
 
@@ -1968,6 +2081,7 @@ namespace Subnautica2HeadTracking
                         postLoc.X, postLoc.Y, postLoc.Z);
                     HarvestMaskCandidatesRecursive(/*passes*/3, /*range*/0x600,
                         postLoc.X, postLoc.Y, postLoc.Z);
+                    AutoDiscoverMaskGroup(postLoc.X, postLoc.Y, postLoc.Z);
                 }
             }
 
