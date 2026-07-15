@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.1] - 2026-07-15
+
+### Added
+
+- fail fast when DISCORD_RELEASE_WEBHOOK is missing
+- add Lopari run link to Discord release announcements
+- sync Lopari catalog pin before Discord announcement
+- add steam/gdk 20260714 build profiles for the latest patch
+
 ## [0.4.0] - 2026-07-10
 
 ### Added
