@@ -17,6 +17,110 @@ namespace Subnautica2HeadTracking::builds
     extern const BuildProfile kSteamProfile_20260522;
     extern const BuildProfile kSteamProfile_20260601;
     extern const BuildProfile kSteamProfile_20260710;
+    extern const BuildProfile kSteamProfile_20260714;
+
+    // ---- Steam Win64 build released ~2026-07-14 (buildid 24153994, PE TS 0xa3d114c1) ----
+    const BuildProfile kSteamProfile_20260714 = {
+        /* Name        */ "steam-win64-20260714",
+        /* Fingerprint */ { 0xa3d114c1u, 0x0dbcf000u, 0x0d5d8938u },
+        /* Offsets     */ {
+            /* ZRegInfo */ {
+                /* kAUWEPlayerCameraManager        */ 0,
+                /* kUWEPlayerCameraManagerSettings */ 0,
+                /* kAPlayerCameraManager           */ 0,
+                /* kMinimalViewInfo                */ 0,
+                /* kUWECameraPackage               */ 0,
+            },
+            /* ZConstruct */ {
+                /* kAUWEPlayerCameraManager */ 0,
+                /* kAPlayerCameraManager    */ 0,
+                /* kMinimalViewInfo         */ 0,
+                /* kUWECameraPackage        */ 0,
+            },
+            /* UECodeGen */ {
+                /* kConstructUClass_thunk */ 0,
+                /* kConstructUClass       */ 0,
+                /* kConstructUPackage     */ 0,
+            },
+            /* UWEPlayerCameraManager */ {
+                /* kInstanceSize_Bytes */ 0,
+                /* kClassFlags         */ 0,
+                /* kStaticsRva         */ 0,
+            },
+            // Struct layouts are engine-ABI-bound (UE5.6.1), not packaging-bound;
+            // carried over from steam-win64-20260710 unchanged.
+            /* USceneComponentLayout */ {
+                /* kComponentToWorldRotation    */ 0x1f0,
+                /* kComponentToWorldTranslation */ 0x210,
+                /* kComponentToWorldScale       */ 0x230,
+            },
+            /* PawnSlots */ {
+                /* kCapsule              */ 0x340,
+                /* kCapsuleAlias         */ 0x1c0,
+                /* kPrimaryMesh          */ 0x330,
+                /* kMeshArrayBegin       */ 0x7c8,
+                /* kMeshArrayStride      */ 0x008,
+                /* kMeshArrayCount       */ 6,
+                /* kCameraMountComponent */ 0x858,
+            },
+            /* PlayerController */ {
+                /* kShowMouseCursorOffset */ 0x554,
+                /* kShowMouseCursorMask   */ 0x1u,
+                /* kPawn                  */ 0x2f0,
+                /* kPlayerCameraManager   */ 0x368,
+            },
+            // Relocated via scripts/derive_globals.py: allocator sig unique hit
+            // (fn 0x016e7070), the `mov [rip],rax` @ fn+0x18e. FName decoder
+            // pair at 0x01475e40/0x01475eb0 agree on the pool and
+            // pool - init_flag == 0x267 holds.
+            /* UObjectGlobals */ {
+                /* kObjObjects       */ 0x0cb26200ULL,
+                /* kObjObjects_Num   */ 0x14,
+                /* kFUObjectItemSize */ 0x18,
+                /* kChunkNumElems    */ 0x10000,
+                /* kFNamePool        */ 0x0ca42000ULL,
+                /* kFNamePoolBlocks  */ 0x10,
+                /* kClassPrivate     */ 0x10,
+                /* kNamePrivate      */ 0x18,
+                /* kOuterPrivate     */ 0x20,
+            },
+            /* VTables */ {
+                /* kCapsuleComponent      */ 0,
+                /* kSkeletalMeshComponent */ 0,
+                /* kCameraMountComponent  */ 0,
+            },
+            /* MinimalViewInfoLayout */ {
+                /* kFovOffset      */ 0x30,
+                /* kRotationStride */ 0x18,
+            },
+            // Relocated for the 2026-07-14 build (buildid 24153994) via
+            // scripts/derive_rvas.py. GPV anchored on the relocation-free
+            // prologue signature, 1 hit. SizeOfImage shrank 0x5000 again, so
+            // RVAs moved down: GPV -0x1a60, render caller -0x1a10.
+            /* kGetPlayerViewPointRva */ 0x043e7640ULL,
+            /* kKnownCallerRvas */ {{
+                0,
+                // 1: render caller. Containing fn 0x0416b7c0 is the
+                // FMinimalViewInfo builder - of 3 PCM:YES candidates only this
+                // one shows the builder window anchored at the +0x7f8 call:
+                // `call [rax+0x7f8]` (PCM FOV vfn) -> `movss [r14],xmm0`
+                // (FOV store) -> `lea r8,[rdi+0x18]` (out_Rotation =
+                // out_Location + kRotationStride) -> `call [rax+0x828]` (GPV).
+                // The other two candidates lack a +0x7f8 call before the GPV
+                // call entirely.
+                0x0416ba07ULL,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            }},
+        },
+    };
 
     // ---- Steam Win64 build released ~2026-07-10 (PE TS 0x1308b6a1) ----
     const BuildProfile kSteamProfile_20260710 = {

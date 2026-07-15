@@ -24,9 +24,112 @@
 
 namespace Subnautica2HeadTracking::builds
 {
+    extern const BuildProfile kGdkProfile_20260714;
     extern const BuildProfile kGdkProfile_20260710;
     extern const BuildProfile kGdkProfile_20260602;
     extern const BuildProfile kGdkProfile_20260524;
+
+    // ---- Xbox/GDK package 0.12.1347.0 (PE TS 0x7f8917fa) ----
+    // Derived from a runtime dump (scripts/dump-running-exe.ps1 -RebaseTo 0,
+    // which preserves the PE CheckSum) fed to scripts/derive_rvas.py +
+    // derive_globals.py. SizeOfImage is identical to 0.11.9503.0 and the
+    // .data globals (ObjObjects/FNamePool) did not move; only the code RVAs
+    // shifted.
+    const BuildProfile kGdkProfile_20260714 = {
+        /* Name        */ "gdk-wingdk-20260714",
+        /* Fingerprint */ { 0x7f8917fau, 0x0cb09000u, 0x0c55b965u },
+        /* Offsets     */ {
+            /* ZRegInfo */ {
+                /* kAUWEPlayerCameraManager        */ 0,
+                /* kUWEPlayerCameraManagerSettings */ 0,
+                /* kAPlayerCameraManager           */ 0,
+                /* kMinimalViewInfo                */ 0,
+                /* kUWECameraPackage               */ 0,
+            },
+            /* ZConstruct */ {
+                /* kAUWEPlayerCameraManager */ 0,
+                /* kAPlayerCameraManager    */ 0,
+                /* kMinimalViewInfo         */ 0,
+                /* kUWECameraPackage        */ 0,
+            },
+            /* UECodeGen */ {
+                /* kConstructUClass_thunk */ 0,
+                /* kConstructUClass       */ 0,
+                /* kConstructUPackage     */ 0,
+            },
+            /* UWEPlayerCameraManager */ {
+                /* kInstanceSize_Bytes */ 0,
+                /* kClassFlags         */ 0,
+                /* kStaticsRva         */ 0,
+            },
+            /* USceneComponentLayout */ {
+                /* kComponentToWorldRotation    */ 0x1f0,
+                /* kComponentToWorldTranslation */ 0x210,
+                /* kComponentToWorldScale       */ 0x230,
+            },
+            /* PawnSlots */ {
+                /* kCapsule              */ 0x340,
+                /* kCapsuleAlias         */ 0x1c0,
+                /* kPrimaryMesh          */ 0x330,
+                /* kMeshArrayBegin       */ 0x7c8,
+                /* kMeshArrayStride      */ 0x008,
+                /* kMeshArrayCount       */ 6,
+                /* kCameraMountComponent */ 0x858,
+            },
+            /* PlayerController */ {
+                /* kShowMouseCursorOffset */ 0x554,
+                /* kShowMouseCursorMask   */ 0x1u,
+                /* kPawn                  */ 0x2f0,
+                /* kPlayerCameraManager   */ 0x368,
+            },
+            // ObjObjects: allocator sig unique hit (fn 0x014fe850), the
+            // `mov [rip],rax` @ fn+0x18e. FNamePool: both decoder variants
+            // (0x0128b2d0 / 0x0128b340) agree, pool - init_flag == 0x267.
+            // Both globals unchanged from gdk-wingdk-20260710.
+            /* UObjectGlobals */ {
+                /* kObjObjects       */ 0x0bb2e500ULL,
+                /* kObjObjects_Num   */ 0x14,
+                /* kFUObjectItemSize */ 0x18,
+                /* kChunkNumElems    */ 0x10000,
+                /* kFNamePool        */ 0x0ba4a280ULL,
+                /* kFNamePoolBlocks  */ 0x10,
+                /* kClassPrivate     */ 0x10,
+                /* kNamePrivate      */ 0x18,
+                /* kOuterPrivate     */ 0x20,
+            },
+            /* VTables */ {
+                /* kCapsuleComponent      */ 0,
+                /* kSkeletalMeshComponent */ 0,
+                /* kCameraMountComponent  */ 0,
+            },
+            /* MinimalViewInfoLayout */ {
+                /* kFovOffset      */ 0x30,
+                /* kRotationStride */ 0x18,
+            },
+            // GPV: 32-byte prologue signature, unique hit (-0x160 from 20260710).
+            /* kGetPlayerViewPointRva */ 0x0417c5e0ULL,
+            /* kKnownCallerRvas */ {{
+                0,
+                // Render caller: fn 0x03f005c0's call [pcm+0x828] retRVA. Of 3
+                // PCM:YES candidates only this one shows the FMinimalViewInfo
+                // builder window anchored at the +0x7f8 call: call [rax+0x7f8]
+                // (PCM FOV vfn) -> movss [r14],xmm0 (FOV store) ->
+                // lea r8,[rdi+0x18] (out_Rotation = out_Location +
+                // kRotationStride) -> call [rax+0x828] (GPV). The other two
+                // lack a +0x7f8 call before the GPV call entirely.
+                0x03f00807ULL,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            }},
+        },
+    };
 
     // ---- Xbox/GDK package 0.11.9503.0 (PE TS 0x17f2983d) ----
     // Derived from a runtime dump (scripts/dump-running-exe.ps1 -RebaseTo 0,
