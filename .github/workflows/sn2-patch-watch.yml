@@ -4,8 +4,10 @@ name: SN2 patch watch
 # When the buildid moves, opens an issue with a rederive checklist and
 # commits the new buildid to .github/sn2-last-known-build.txt so the next
 # run only fires on a further change. This is the "heads up so I can prep
-# a new release" channel; the in-game ValidateRunningBuild remains the
-# hard backstop that prevents stale RVAs from crashing users' sessions.
+# a new release" channel; builds::SelectProfile remains the hard backstop
+# that keeps the mod dormant rather than hooking stale RVAs in users'
+# sessions. This watcher sees Steam only - GDK/Game Pass ships the same
+# patch as its own build with its own fingerprint.
 
 on:
   schedule:
@@ -98,11 +100,13 @@ jobs:
           ## Rederive checklist
 
           1. Update SN2 via Steam, then quit it cleanly.
-          2. Run \`pixi run check-fingerprint\` against the updated \`Subnautica2-Win64-Shipping.exe\` to see whether the EXE actually changed (not just an asset-only patch). If the fingerprint already matches \`ghidra_offsets.h\`, close this issue - no rederivation needed.
-          3. If fingerprint differs: re-import the EXE in Ghidra and run \`pixi run ghidra-script dump_pe_fingerprint\` + \`pixi run ghidra-script rederive_all\` (see \`.lab/NOTES.md\` for the full flow).
-          4. Update \`src/Subnautica2HeadTracking/ghidra_offsets.h\` with the new constants.
-          5. Smoke-test in-game, bump version, ship via \`pixi run release\`.
-          6. Close this issue once the release is out.
+          2. Run \`pixi run check-fingerprint\` against the updated \`Subnautica2-Win64-Shipping.exe\`. Exit 0 means a committed profile still matches (asset-only patch, the EXE was not relinked) - close this issue, nothing to do. Exit 1 means the EXE changed and the RVAs moved.
+          3. Derive the new RVAs deterministically: \`py -3 scripts/derive_rvas.py <exe>\` (GetPlayerViewPoint, render caller, ObjObjects, FNamePool). Ghidra is the fallback, not the first move - \`pixi run ghidra-script rederive_all\` only if the deterministic pass comes up short. See \`.lab/NOTES.md\` for the playbook and the per-patch history.
+          4. Add a NEW \`kSteamProfile_YYYYMMDD\` to \`src/Subnautica2HeadTracking/builds/steam_offsets.cpp\` and register it at the TOP of \`kKnownProfiles\` in \`builds/build_registry.cpp\`. Append only: never edit or delete an existing profile, or every user who has not taken this patch loses head tracking with no way back.
+          5. Xbox/Game Pass got the same patch as a separate build this watcher cannot see. Dump the running GDK EXE (\`scripts/dump-running-exe.ps1 -RebaseTo 0\`), derive against the dump, and add \`kGdkProfile_YYYYMMDD\` the same way. A GDK package update wipes the mod out of the WinGDK folder, so \`pixi run install\` again before testing.
+          6. Smoke-test in-game on a loaded save, not the title screen - GetPlayerViewPoint does not fire at the menu, so a clean build-check there proves only that the fingerprint matched.
+          7. Bump version and ship via \`pixi run release\`. CHANGELOG entry is an addition ("adds support for build YYYYMMDD"), not a fix.
+          8. Close this issue once the release is out.
 
           ---
           Auto-opened by \`.github/workflows/sn2-patch-watch.yml\`.

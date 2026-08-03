@@ -3,14 +3,9 @@
 #include "build_profile.h"
 
 // Profile registry and selection. SelectProfile() fingerprints the host EXE
-// (PE TimeDateStamp + SizeOfImage + CheckSum) and returns the matching entry
-// from the known-profiles array, or nullptr if no profile claims this build.
-// The pointer is then stashed via SetActiveProfile() so the rest of the code
-// can read RVAs and field offsets without re-fingerprinting on every call.
-//
-// Offsets() is the call-site accessor that replaces the old Offsets:: namespace
-// in ghidra_offsets.h. The naming overlap is intentional: existing references
-// `Offsets::ZRegInfo::kFoo` become `Offsets().ZRegInfo.kFoo` - mechanical.
+// (PE TimeDateStamp + SizeOfImage + CheckSum) against the known-profiles
+// array and, on a match, records that profile as active so the rest of the
+// code reads RVAs and field offsets without re-fingerprinting per call.
 
 namespace Subnautica2HeadTracking
 {
@@ -39,9 +34,9 @@ namespace Subnautica2HeadTracking
         bool                HasActiveProfile();
     }
 
-    // Accessor for the active profile's offset table. Asserts that a profile
-    // has been selected; callers must run after SelectProfile() returns
-    // Matched. Inline so the lookup is a single load on the hot paths.
+    // Accessor for the active profile's offset table. Only valid once
+    // SelectProfile() has returned Matched; nothing in the mod may touch game
+    // memory before that. Inline so the lookup is a single load on hot paths.
     inline const OffsetTable& Offsets()
     {
         return builds::ActiveProfile().Offsets;

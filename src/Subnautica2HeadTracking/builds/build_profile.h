@@ -9,16 +9,15 @@
 // One BuildProfile describes a single packaging/build of Subnautica 2: the
 // PE-header fingerprint that uniquely identifies it, and every per-build
 // constant (RVAs into the EXE, UObject/USceneComponent field offsets) the
-// mod needs to operate. The registry holds one profile per supported build
-// (Steam Win64 today; WinGDK / Xbox planned). At Initialize() time the mod
-// fingerprints the live module and selects the matching profile; no match
-// leaves the mod dormant via the existing fail-safe path.
+// mod needs to operate. The registry holds one profile per shipped build,
+// across Steam Win64 and WinGDK/Xbox, and is append-only: a game patch adds a
+// profile, never edits one, so users who have not taken the patch keep
+// matching their old build. At Initialize() time the mod fingerprints the live
+// module and selects the matching profile; no match leaves the mod dormant.
 //
-// Field names mirror the namespaces in the previous ghidra_offsets.h so
-// call-site diffs are mechanical: `Offsets::ZRegInfo::kFoo` becomes
-// `Offsets().ZRegInfo.kFoo`. Struct layouts (UObject/USceneComponent/FName)
-// are engine-version-bound, not packaging-bound, so most fields will match
-// across Steam and WinGDK profiles; only the RVAs differ.
+// Struct layouts (UObject/USceneComponent/FName) are engine-version-bound,
+// not packaging-bound, so most of those fields match across Steam and WinGDK
+// profiles; only the RVAs differ.
 
 namespace Subnautica2HeadTracking
 {

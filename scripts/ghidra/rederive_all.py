@@ -1,6 +1,6 @@
 # Consolidated post-patch re-derivation. String/structure-anchored so it does
 # not depend on any previously-captured RVA (those all move on a patch).
-# Emits the load-bearing RVAs for headtracking_mod.cpp / ghidra_offsets.h:
+# Emits the load-bearing RVAs for a new build profile in builds/<store>_offsets.cpp:
 #   - GetPlayerViewPoint hook target (+ prologue bytes for sanity)
 #   - every static call site to GPV (retRVA = _ReturnAddress) + containing fn,
 #     annotated with string refs in that fn so the render-path caller stands out

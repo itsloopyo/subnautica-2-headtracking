@@ -142,7 +142,22 @@ namespace Subnautica2HeadTracking
         // at zero head offset rather than wherever the tracker happens to read.
         std::atomic<bool> g_posCenterPending{true};
 
+        void Recenter()
+        {
+            if (!g_receiver) return;
+            g_receiver->Recenter();
+            g_interp.Reset();
+            g_hasSmoothed = false;
+            g_posCenterPending.store(true);
+            Log::Line("Recenter");
+        }
+
         bool GetProcessedRotation(float& outYaw, float& outPitch, float& outRoll) {
+            if (g_receiver->TryConsumeRecenterRequest()) {
+                Recenter();
+                Log::Line("Recentered by tracker app");
+            }
+
             float rawYaw = 0.0f, rawPitch = 0.0f, rawRoll = 0.0f;
             if (!g_receiver->GetRotation(rawYaw, rawPitch, rawRoll)) {
                 return false;
@@ -2936,13 +2951,7 @@ namespace Subnautica2HeadTracking
             // on its letter key by the poller, so the bare letter is a no-op
             // during gameplay.
             const auto recenter = []() {
-                if (g_receiver) {
-                    g_receiver->Recenter();
-                    g_interp.Reset();
-                    g_hasSmoothed = false;
-                    g_posCenterPending.store(true);  // re-zero head sway too
-                    Log::Line("Recenter");
-                }
+                Recenter();
             };
             const auto toggleTracking = []() {
                 const bool now = !g_trackingEnabled.exchange(!g_trackingEnabled.load());

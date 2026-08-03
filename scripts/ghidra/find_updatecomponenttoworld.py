@@ -16,7 +16,7 @@ from ghidra.program.model.scalar import Scalar
 OUT = r"C:\tmp\sub2_updatecomponenttoworld.txt"
 IMAGE_BASE = 0x140000000
 
-# RVAs from ghidra_offsets.h VTables namespace.
+# RVAs from the active build profile's VTables group (builds/steam_offsets.cpp).
 VTABLES = [
     ("SkeletalMeshComponent", 0x0a2e2a48),
     ("CapsuleComponent",      0x0a2a2748),
