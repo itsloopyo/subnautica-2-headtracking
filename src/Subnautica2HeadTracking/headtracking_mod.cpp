@@ -2865,6 +2865,14 @@ namespace Subnautica2HeadTracking
                 ps.limit_z = 0.10f;
                 ps.limit_z_back = 0.40f;
 
+                // The position stream is true 6DOF anchored at the eyes: the
+                // rotation-induced eye swing in the data is real camera motion
+                // to apply, not a tracker artifact. The C++ core's 0.15m
+                // default would cancel that swing (and, for a tracker whose
+                // origin is at the pivot, inject ~0.15*sin(pitch) of spurious
+                // vertical motion instead), so it must stay off.
+                g_posProcessor.SetTrackerPivotForward(0.0f);
+
                 cameraunlock::IniReader ini;
                 const std::string iniPath = DllDirNarrow(module) + "HeadTracking.ini";
                 if (ini.Open(iniPath)) {
