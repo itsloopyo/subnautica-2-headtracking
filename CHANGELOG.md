@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.5.0] - 2026-08-03
+
+### Added
+
+- recenter on tracker-app request, refresh rederive docs for the profile registry
+
+### Fixed
+
+- keep tracker pivot-forward compensation off, the position stream is eye-anchored 6DOF
+
+### Other
+
+- SN2 patch watch: record buildid 24153994 [skip ci]
+- Link Discord, Lopari and Headcam from the README
+
 ## [0.4.1] - 2026-07-15
 
 ### Added
