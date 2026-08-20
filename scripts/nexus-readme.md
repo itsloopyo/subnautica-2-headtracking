@@ -122,10 +122,13 @@ keep one.
 
 | Action                          | Nav-cluster | Chord          |
 |---------------------------------|-------------|----------------|
-| Recenter                        | `Home`      | `Ctrl+Shift+T` |
 | Toggle tracking                 | `End`       | `Ctrl+Shift+Y` |
 | Cycle tracking mode             | `Page Up`   | `Ctrl+Shift+G` |
 | Toggle yaw mode (world / local) | `Page Down` | `Ctrl+Shift+H` |
+
+The mod applies the pose your tracker sends and keeps no centre of its own. To
+recentre, use the centre control in your tracker app: Center in opentrack,
+CENTER in Headcam, or the equivalent in whatever you run.
 
 For configuration, OpenTrack setup, and troubleshooting, see the full
 README in the project's GitHub repo:

@@ -100,7 +100,7 @@ foreach ($name in $exeNames) {
 
 $modFiles  = @('dxgi.dll', 'dxgi_orig.dll', 'HeadTracking.ini')
 $legacyFiles = @('Subnautica2HeadTracking.asi', 'winmm.dll', 'dinput8.dll', 'xinput1_3.dll')
-$logArtefacts = @('Subnautica2HeadTracking.log', 'Subnautica2HeadTracking.marks.txt')
+$logArtefacts = @('Subnautica2HeadTracking.log', 'Subnautica2HeadTracking.prev.log', 'Subnautica2HeadTracking.marks.txt')
 
 Write-Host ""
 Write-Host "=== Subnautica 2 Head Tracking - Uninstall ===" -ForegroundColor Cyan

@@ -1,5 +1,30 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- Three render-path log lines were gated on a call count, which runs at the
+  player's frame rate: `mask-comp` every 120 calls and `pos #` / `hook #` every
+  600 cost 300-780 KB and 120-280 KB an hour respectively, more on a fast
+  machine, burying the startup chain a user is asked to read. `mask-comp` is now
+  time-gated at 30 seconds; the `pos #` / `hook #` pair is a bounded burst of 20
+  samples. The heartbeat, its 2-second ramp over the first 30 seconds, and the
+  build-check diagnostics are unchanged.
+- The log keeps one previous generation. It already started fresh on every
+  launch, so a crash followed by a relaunch destroyed the session worth reading
+  - the one the crash handler had just written into. It is now kept as
+  `Subnautica2HeadTracking.prev.log`, and uninstall removes it.
+
+- The mod no longer keeps a centre of its own and applies the tracker pose as
+  absolute. Every tracker app centres itself, so a mod-side centre sat in series
+  with the tracker's and the two drifted apart. Centre in your tracker app
+  instead. The recentre hotkey (Home / Ctrl+Shift+T) and the tracker-app
+  recentre request handling are gone with it.
+- smoothing is now two keys in `[Tracking]`: `LocalSmoothing` (default 0.0) for a tracker running on this machine and `RemoteSmoothing` (default 0.15) for a remote device on the network, selected per connection from the packet source address
+- removed `[Tracking] Smoothing` and `[Position] Smoothing`; both rotation and position use the same pair of values
+- removed the hidden 0.15 baseline smoothing floor, so a local tracker now gets zero-latency tracking by default
+
 ## [0.5.0] - 2026-08-03
 
 ### Added

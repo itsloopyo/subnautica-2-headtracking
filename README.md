@@ -139,10 +139,13 @@ Two equivalent binding sets - use whichever your keyboard has:
 
 | Action                          | Nav-cluster | Chord          |
 |---------------------------------|-------------|----------------|
-| Recenter                        | `Home`      | `Ctrl+Shift+T` |
 | Toggle tracking                 | `End`       | `Ctrl+Shift+Y` |
 | Cycle tracking mode             | `Page Up`   | `Ctrl+Shift+G` |
 | Toggle yaw mode (world / local) | `Page Down` | `Ctrl+Shift+H` |
+
+The mod applies the pose your tracker sends and keeps no centre of its own. To
+recentre, use the centre control in your tracker app: Center in opentrack,
+CENTER in Headcam, or the equivalent in whatever you run.
 
 `Page Up` / `Ctrl+Shift+G` cycles tracking mode:
 
@@ -171,29 +174,35 @@ If you installed the game to another drive or folder, use that install's
 ```ini
 [Network]
 Port = 4242            ; OpenTrack UDP port
-BindAddress = 0.0.0.0  ; listen on all interfaces
 
 [Tracking]
-EnableOnStartup = true ; start with tracking active
+; start with tracking active
+EnableOnStartup = true
 YawSensitivity = 1.0   ; multiplier for left/right look
 PitchSensitivity = 1.0 ; multiplier for up/down look
 RollSensitivity = 1.0  ; multiplier for head tilt
 InvertYaw = false
 InvertPitch = false
 InvertRoll = false
-Smoothing = 0.0        ; 0.0 = responsive, 1.0 = heavy (0.15 floor applied internally)
-AimDecoupling = true   ; head moves view, mouse/controller still aims
-ShowReticle = true     ; move the game's reticle to the aim point
-WorldSpaceYaw = true   ; true = horizon-locked yaw (default), false = camera-local
+LocalSmoothing = 0.0   ; smoothing for a tracker on this machine (loopback); 0 = none, 1 = heavy
+RemoteSmoothing = 0.15 ; smoothing for a remote device on the network; 0 = none, 1 = heavy
+; move the game's reticle to the aim point
+ShowReticle = true
+; true = horizon-locked yaw (default), false = camera-local
+WorldSpaceYaw = true
 
 [Position]
-Enabled = true         ; 6DOF head position tracking
+; 6DOF head position tracking
+Enabled = true
 SensitivityX = 1.0
 SensitivityY = 1.0
 SensitivityZ = 1.0
-InvertX = true         ; sideways lean direction
-InvertY = false        ; vertical move direction
-InvertZ = true         ; forward/back lean direction
+; sideways lean direction
+InvertX = true
+; vertical move direction
+InvertY = false
+; forward/back lean direction
+InvertZ = true
 LimitX = 0.30          ; max sideways lean in meters
 LimitY = 0.20          ; max vertical move in meters
 ; Z limits are swapped because InvertZ = true: with inversion, forward maps to
@@ -202,12 +211,11 @@ LimitY = 0.20          ; max vertical move in meters
 ; the player, so LimitZBack holds the generous value here.
 LimitZ = 0.10          ; backward lean limit in meters
 LimitZBack = 0.40      ; forward lean limit in meters
-Smoothing = 0.15
 
 [Hotkeys]
-; Recenter (Home), toggle tracking (End), and cycle tracking mode (Page Up)
-; are fixed, each also reachable with a Ctrl+Shift chord. Only the yaw-mode
-; toggle is rebindable here. VK code: PageDown = 0x22.
+; Toggle tracking (End) and cycle tracking mode (Page Up) are fixed, each also
+; reachable with a Ctrl+Shift chord. Only the yaw-mode toggle is rebindable
+; here. VK code: PageDown = 0x22.
 ToggleYawMode = 0x22
 ```
 
@@ -226,8 +234,8 @@ ToggleYawMode = 0x22
 
 **Jittery / unstable tracking**
 
-- Raise `Smoothing` in `[Tracking]` toward 0.3-0.5.
-- On a wireless or phone tracker, expect more jitter; the built-in 0.15 smoothing floor helps but more smoothing reduces it further.
+- Raise the smoothing key that matches your tracker: `LocalSmoothing` in `[Tracking]` for a tracker on this machine, `RemoteSmoothing` for a device on the network. 0.3-0.5 is a good starting point.
+- On a wireless or phone tracker, expect more jitter; `RemoteSmoothing` defaults to 0.15 and can go higher.
 
 **Wrong rotation axis**
 

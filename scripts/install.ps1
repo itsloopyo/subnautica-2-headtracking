@@ -232,7 +232,7 @@ Write-Host "  Installation Complete!"                  -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "Launch the game normally."
-Write-Host "Controls: Home / Ctrl+Shift+T = recenter, End / Ctrl+Shift+Y = toggle tracking,"
+Write-Host "Controls: End / Ctrl+Shift+Y = toggle tracking,"
 Write-Host "          Page Up / Ctrl+Shift+G = cycle tracking mode,"
 Write-Host "          Page Down / Ctrl+Shift+H = toggle yaw mode"
 Write-Host ""

@@ -110,10 +110,76 @@ namespace Subnautica2HeadTracking
         FrameClock g_rotClock;
         float g_smoothedYaw = 0.0f, g_smoothedPitch = 0.0f, g_smoothedRoll = 0.0f;
         bool  g_hasSmoothed = false;
-        // User smoothing setting. Floor of kBaselineSmoothing (0.15) applies
-        // unconditionally in GetEffectiveSmoothing - that's what makes the
-        // 30Hz tracker not look like 30fps on a 60+Hz display.
-        float g_userSmoothing = 0.0f;
+        // User smoothing settings. GetEffectiveSmoothing picks one per
+        // connection: a tracker on this machine is already stable so it gets
+        // g_localSmoothing, while a phone over WiFi gets g_remoteSmoothing.
+        float g_localSmoothing  = static_cast<float>(cameraunlock::math::kDefaultLocalSmoothing);
+        float g_remoteSmoothing = static_cast<float>(cameraunlock::math::kDefaultRemoteSmoothing);
+        // Last connection locality pushed to the position processor. The
+        // receiver classifies every packet's source address, so switching from
+        // a local OpenTrack instance to a phone mid-session swaps the
+        // smoothing parameter without restarting the game.
+        bool g_isRemoteConnection = false;
+        bool g_remoteConnectionKnown = false;
+
+        // The strtod behind IniReader::ReadFloat parses "nan" and "inf" as
+        // perfectly valid floats, and std::clamp does NOT reject a NaN because
+        // both of its comparisons are false. Such a value would reach
+        // CalculateSmoothingFactor, skip that function's own speed clamp for
+        // the same reason, and exp(NaN) would return NaN - which then poisons
+        // the smoothed FRotator and FVector written back through the
+        // GetPlayerViewPoint hook for the rest of the session, with nothing in
+        // the log to explain the dead camera. Same shape as the [Network] Port
+        // range check in the config block: reject, log, use a documented value.
+        //
+        // The per-key fallback matters: a malformed RemoteSmoothing must not
+        // drop back to the LOCAL default, which would leave a phone on WiFi
+        // running with no smoothing at all on raw network jitter.
+        //
+        // Validation, never a floor: a finite value inside [0,1] is returned
+        // untouched, so a deliberately configured 0.0 stays 0.0.
+        float SanitizeSmoothing(const char* key, float v, float fallback)
+        {
+            if (!std::isfinite(v)) {
+                Log::Line("config: [Tracking] %s is not a finite number, using %.2f",
+                    key, fallback);
+                return fallback;
+            }
+            if (v < 0.0f || v > 1.0f) {
+                const float clamped = (v < 0.0f) ? 0.0f : 1.0f;
+                Log::Line("config: [Tracking] %s %.2f is outside 0.0-1.0, using %.2f",
+                    key, v, clamped);
+                return clamped;
+            }
+            return v;
+        }
+
+        // Warned once per process rather than once per load: config is
+        // reloadable, and repeating this on every reload buries it.
+        //
+        // The old value is deliberately NOT migrated into the new keys. The
+        // single Smoothing value carried a hidden 0.15 floor, so the number in
+        // an existing config does not mean what it used to: copying it across
+        // would hand a local user smoothing they never chose under the new
+        // semantics, and copying it into only one of the two keys would be a
+        // guess about which connection they were on.
+        void WarnRetiredSmoothingKey(const cameraunlock::IniReader& ini,
+            const char* section, const char* key)
+        {
+            static bool warned = false;
+            if (warned) return;
+            if (ini.ReadString(section, key, "").empty()) return;
+            warned = true;
+            Log::Line(
+                "WARNING: Config key [%s] %s has been retired and is IGNORED. Smoothing "
+                "is now two keys: LocalSmoothing (default 0, applies to a tracker on "
+                "this machine) and RemoteSmoothing (default 0.15, applies to a tracker "
+                "on the network). The old value is not migrated because the semantics "
+                "changed - it carried a hidden 0.15 floor that no longer exists. Set "
+                "the two new keys.",
+                section, key);
+        }
+
         // Per-axis sensitivity and inversion, applied to the smoothed output
         // (last pipeline stage). Written once from HeadTracking.ini in
         // BootstrapThread before the hook is installed.
@@ -122,8 +188,9 @@ namespace Subnautica2HeadTracking
 
         // Positional (6DOF) pipeline. Same single-render-thread access as the
         // rotation pipeline - no locks. Defaults (sensitivity 1.0, limits
-        // 0.30/0.20/0.40/0.10m, smoothing 0.15) come from PositionSettings,
-        // matching HeadTracking.ini's [Position] section.
+        // 0.30/0.20/0.40/0.10m) come from PositionSettings, matching
+        // HeadTracking.ini's [Position] section. Position smoothing is the
+        // same LocalSmoothing/RemoteSmoothing pair the rotation pipeline uses.
         cameraunlock::PositionProcessor   g_posProcessor;
         cameraunlock::PositionInterpolator g_posInterp;
         std::atomic<bool> g_positionEnabled{true};
@@ -137,27 +204,25 @@ namespace Subnautica2HeadTracking
         // 2 = position only (rotation off). Advancing past 2 wraps to 0.
         std::atomic<int> g_trackingMode{0};
         FrameClock g_posClock;
-        // Set on first sample and on every Home press: the next sample becomes
-        // the position center, so the player starts the session (and re-centers)
-        // at zero head offset rather than wherever the tracker happens to read.
-        std::atomic<bool> g_posCenterPending{true};
 
-        void Recenter()
-        {
-            if (!g_receiver) return;
-            g_receiver->Recenter();
-            g_interp.Reset();
-            g_hasSmoothed = false;
-            g_posCenterPending.store(true);
-            Log::Line("Recenter");
+        // Reads the receiver's connection locality and, on a change, pushes it
+        // into the position processor. Render-thread only, like the rest of
+        // the pipeline state.
+        bool UpdateConnectionLocality() {
+            const bool isRemote = g_receiver->IsRemoteConnection();
+            if (!g_remoteConnectionKnown || isRemote != g_isRemoteConnection) {
+                g_isRemoteConnection = isRemote;
+                g_remoteConnectionKnown = true;
+                g_posProcessor.SetIsRemoteConnection(isRemote);
+                Log::Line("tracker source is %s - smoothing=%.2f",
+                    isRemote ? "a remote device" : "on this machine",
+                    cameraunlock::math::GetEffectiveSmoothing(
+                        g_localSmoothing, g_remoteSmoothing, isRemote));
+            }
+            return isRemote;
         }
 
         bool GetProcessedRotation(float& outYaw, float& outPitch, float& outRoll) {
-            if (g_receiver->TryConsumeRecenterRequest()) {
-                Recenter();
-                Log::Line("Recentered by tracker app");
-            }
-
             float rawYaw = 0.0f, rawPitch = 0.0f, rawRoll = 0.0f;
             if (!g_receiver->GetRotation(rawYaw, rawPitch, rawRoll)) {
                 return false;
@@ -172,7 +237,8 @@ namespace Subnautica2HeadTracking
             auto interp = g_interp.Update(rawYaw, rawPitch, rawRoll, isNew, dt);
 
             const float eff = static_cast<float>(
-                cameraunlock::math::GetEffectiveSmoothing(g_userSmoothing));
+                cameraunlock::math::GetEffectiveSmoothing(
+                    g_localSmoothing, g_remoteSmoothing, UpdateConnectionLocality()));
             if (!g_hasSmoothed) {
                 g_smoothedYaw = interp.yaw;
                 g_smoothedPitch = interp.pitch;
@@ -724,8 +790,14 @@ namespace Subnautica2HeadTracking
                 }
             }
 
+            // Time-gated, not call-gated: this runs on the render path, so every
+            // 120 calls is every 2s at 60Hz but under 1s at 144Hz - 300 to 780 KB
+            // an hour of one repeating line.
             const auto n = g_maskCompLogCount.fetch_add(1, std::memory_order_relaxed) + 1;
-            if (n == 1 || (n % 120) == 0) {
+            static std::atomic<std::uint64_t> s_lastMaskLog{0};
+            const std::uint64_t maskNow = GetTickCount64();
+            if (n == 1 || maskNow - s_lastMaskLog.load(std::memory_order_relaxed) >= 30000) {
+                s_lastMaskLog.store(maskNow, std::memory_order_relaxed);
                 Log::Line("mask-comp on  mode=%d  wrote=%d/%d  skip(null=%d read=%d write=%d) reassert=%d  H=(P=%.2f Y=%.2f R=%.2f)  pivot=(%.1f, %.1f, %.1f)",
                     mode, wrote, total,
                     skipNull, skipRead, skipWrite, reassert,
@@ -781,7 +853,7 @@ namespace Subnautica2HeadTracking
 
                 // delta = cur * baseline^-1 : the engine's rotation of the mask
                 // since the baseline was captured (i.e. since the head was at
-                // rest / recentered).
+                // rest).
                 const FQuat4d delta = QuatMul(cur, QuatInv(baseline));
                 const FRotator dRot = QuatToRotator(delta);
                 if (doLog) {
@@ -1998,16 +2070,14 @@ namespace Subnautica2HeadTracking
             float px = 0.0f, py = 0.0f, pz = 0.0f;
             if (!g_receiver->GetPosition(px, py, pz)) return false;
 
+            // Position-only tracking mode never runs the rotation pipeline, so
+            // the processor's locality flag is refreshed here too.
+            UpdateConnectionLocality();
+
             const float dt = g_posClock.Tick();
 
             const std::int64_t ts = g_receiver->GetLastReceiveTimestamp();
             cameraunlock::PositionData raw(px, py, pz, ts);
-
-            if (g_posCenterPending.exchange(false)) {
-                g_posProcessor.SetCenter(raw);
-                g_posProcessor.ResetSmoothing();
-                g_posInterp.Reset();
-            }
 
             const cameraunlock::PositionData interp = g_posInterp.Update(raw, dt);
             const cameraunlock::math::Quat4 headQ =
@@ -2300,14 +2370,25 @@ namespace Subnautica2HeadTracking
                                            postLoc, posOffset, H);
             }
 
-            if (n == 1 || (n % 600) == 0) {
+            // Bounded burst rather than a permanent stream. A call-count gate
+            // also runs at the player's frame rate - 600 calls is 10s at 60Hz
+            // but 4s at 144Hz - so these two lines cost 120-280 KB an hour on a
+            // fast machine and bury the startup chain. Twenty samples 2s apart
+            // carry the same evidence; the heartbeat above covers liveness for
+            // the rest of the session.
+            static std::atomic<std::uint64_t> s_lastDetail{0};
+            static std::atomic<int> s_detailCount{0};
+            const std::uint64_t detailNow = GetTickCount64();
+            if (s_detailCount.load(std::memory_order_relaxed) < 20 &&
+                (n == 1 || detailNow - s_lastDetail.load(std::memory_order_relaxed) >= 2000)) {
+                s_lastDetail.store(detailNow, std::memory_order_relaxed);
+                s_detailCount.fetch_add(1, std::memory_order_relaxed);
+
                 Log::Line("pos #%llu enabled=%s offsetUE=(%.2f,%.2f,%.2f)",
                     static_cast<unsigned long long>(n),
                     g_positionEnabled.load() ? "ON" : "OFF",
                     posOffset.X, posOffset.Y, posOffset.Z);
-            }
 
-            if (n == 1 || (n % 600) == 0) {
                 Log::Line("hook #%llu retRVA=0x%08llx loc_pre=(%.3f,%.3f,%.3f) loc_post=(%.3f,%.3f,%.3f) rot_post=(Y=%.2f P=%.2f R=%.3e) tracker=(Y=%.2f P=%.2f R=%.2f) result=(Y=%.2f P=%.2f R=%.2f)",
                     static_cast<unsigned long long>(n),
                     static_cast<unsigned long long>(retRva),
@@ -2789,6 +2870,13 @@ namespace Subnautica2HeadTracking
             g_bootstrapTickStart = GetTickCount64();
             g_marksFilePath = DllDir(module) + L"Subnautica2HeadTracking.marks.txt";
             const auto logPath = LogPathNextToDll(module);
+            // Core opens with CREATE_ALWAYS, so the log is this session only.
+            // Keep one generation: the session worth reading is usually the one
+            // that just crashed (the crash handler installed below writes into
+            // this same file), and the user relaunches before sending it.
+            MoveFileExW(logPath.c_str(),
+                        (DllDir(module) + L"Subnautica2HeadTracking.prev.log").c_str(),
+                        MOVEFILE_REPLACE_EXISTING);
             Log::Open(logPath);
             Log::Line("Subnautica 2 Head Tracking - bootstrap");
             Log::Line("Process: PID=%lu", GetCurrentProcessId());
@@ -2890,7 +2978,13 @@ namespace Subnautica2HeadTracking
                     g_invertYaw     = ini.ReadBool("Tracking", "InvertYaw", false);
                     g_invertPitch   = ini.ReadBool("Tracking", "InvertPitch", false);
                     g_invertRoll    = ini.ReadBool("Tracking", "InvertRoll", false);
-                    g_userSmoothing = ini.ReadFloat("Tracking", "Smoothing", 0.0f);
+                    g_localSmoothing  = SanitizeSmoothing("LocalSmoothing",
+                        ini.ReadFloat("Tracking", "LocalSmoothing", g_localSmoothing),
+                        static_cast<float>(cameraunlock::math::kDefaultLocalSmoothing));
+                    g_remoteSmoothing = SanitizeSmoothing("RemoteSmoothing",
+                        ini.ReadFloat("Tracking", "RemoteSmoothing", g_remoteSmoothing),
+                        static_cast<float>(cameraunlock::math::kDefaultRemoteSmoothing));
+                    WarnRetiredSmoothingKey(ini, "Tracking", "Smoothing");
                     g_reticleMoveOn.store(ini.ReadBool("Tracking", "ShowReticle", true));
                     g_worldSpaceYaw.store(ini.ReadBool("Tracking", "WorldSpaceYaw", true));
 
@@ -2908,7 +3002,9 @@ namespace Subnautica2HeadTracking
                     ps.limit_y       = ini.ReadFloat("Position", "LimitY", ps.limit_y);
                     ps.limit_z       = ini.ReadFloat("Position", "LimitZ", ps.limit_z);
                     ps.limit_z_back  = ini.ReadFloat("Position", "LimitZBack", ps.limit_z_back);
-                    ps.smoothing     = ini.ReadFloat("Position", "Smoothing", ps.smoothing);
+                    // No position smoothing key: position uses the same
+                    // LocalSmoothing / RemoteSmoothing pair as rotation.
+                    WarnRetiredSmoothingKey(ini, "Position", "Smoothing");
 
                     yawModeKey = ini.ReadHex("Hotkeys", "ToggleYawMode", 0x22);
 
@@ -2921,23 +3017,27 @@ namespace Subnautica2HeadTracking
                     g_disableMaskComp.store(
                         ini.ReadBool("Debug", "DisableMaskComp", false));
 
-                    Log::Line("config: Port=%d  EnableOnStartup=%s  Sens=(Y=%.2f P=%.2f R=%.2f)  Invert=(Y=%d P=%d R=%d)  Smoothing=%.2f  ShowReticle=%s  WorldSpaceYaw=%s",
+                    Log::Line("config: Port=%d  EnableOnStartup=%s  Sens=(Y=%.2f P=%.2f R=%.2f)  Invert=(Y=%d P=%d R=%d)  LocalSmoothing=%.2f  RemoteSmoothing=%.2f  ShowReticle=%s  WorldSpaceYaw=%s",
                         udpPort,
                         g_trackingEnabled.load() ? "true" : "false",
                         g_yawSens, g_pitchSens, g_rollSens,
                         g_invertYaw ? 1 : 0, g_invertPitch ? 1 : 0, g_invertRoll ? 1 : 0,
-                        g_userSmoothing,
+                        g_localSmoothing, g_remoteSmoothing,
                         g_reticleMoveOn.load() ? "true" : "false",
                         g_worldSpaceYaw.load() ? "true" : "false");
-                    Log::Line("config: TooltipFollow=%s scale=%.2f  PosEnabled=%s PosSmoothing=%.2f  ToggleYawMode=0x%02x  DisableMaskComp=%s",
+                    Log::Line("config: TooltipFollow=%s scale=%.2f  PosEnabled=%s  ToggleYawMode=0x%02x  DisableMaskComp=%s",
                         g_tooltipMoveOn.load() ? "true" : "false",
                         g_tooltipFollowScale.load(),
                         g_positionEnabled.load() ? "true" : "false",
-                        ps.smoothing, yawModeKey,
+                        yawModeKey,
                         g_disableMaskComp.load() ? "true" : "false");
                 } else {
                     Log::Line("config: no HeadTracking.ini next to DLL; using defaults");
                 }
+                // Position runs on the same two smoothing parameters as
+                // rotation; there is no separate position smoothing key.
+                ps.local_smoothing  = g_localSmoothing;
+                ps.remote_smoothing = g_remoteSmoothing;
                 g_posProcessor.SetSettings(ps);
             }
 
@@ -2958,9 +3058,6 @@ namespace Subnautica2HeadTracking
             // gated on the Ctrl+Shift modifier (ChordGuarded) and edge-detected
             // on its letter key by the poller, so the bare letter is a no-op
             // during gameplay.
-            const auto recenter = []() {
-                Recenter();
-            };
             const auto toggleTracking = []() {
                 const bool now = !g_trackingEnabled.exchange(!g_trackingEnabled.load());
                 Log::Line("Tracking toggled: %s", now ? "ON" : "OFF");
@@ -2987,7 +3084,6 @@ namespace Subnautica2HeadTracking
                         g_positionEnabled.store(true);
                         break;
                 }
-                g_posCenterPending.store(true);  // re-zero sway when position re-enables
                 static const char* names[] = {
                     "NORMAL (rotation + position)",
                     "ROTATION ONLY (position off)",
@@ -3001,9 +3097,6 @@ namespace Subnautica2HeadTracking
                 Log::Line("yaw-mode -> %s", now ? "WORLD (horizon-locked)" : "LOCAL (camera-local)");
             };
 
-            // Recenter: Home / Ctrl+Shift+T
-            g_hotkeys->SetRecenterKey(VK_HOME, recenter);
-            g_hotkeys->AddHotkey(0x54 /* T */, ChordGuarded(recenter));
             // Toggle tracking: End / Ctrl+Shift+Y
             g_hotkeys->SetToggleKey(VK_END, toggleTracking);
             g_hotkeys->AddHotkey(0x59 /* Y */, ChordGuarded(toggleTracking));
@@ -3039,13 +3132,12 @@ namespace Subnautica2HeadTracking
                 const bool now = !g_maskDiagEnabled.load();
                 g_maskDiagEnabled.store(now);
                 if (now) g_maskDiagArm.store(true);  // recapture baseline
-                Log::Line("mask-diag -> %s  (read-only; recenter head, then move it to read maskDelta vs headH ratios)",
+                Log::Line("mask-diag -> %s  (read-only; hold your head still, then move it to read maskDelta vs headH ratios)",
                     now ? "ON (comp writes suppressed)" : "OFF");
             });
             g_hotkeys->AddHotkey(VK_F8, []() {
                 const bool now = !g_positionEnabled.load();
                 g_positionEnabled.store(now);
-                g_posCenterPending.store(true);  // re-zero on re-enable
                 Log::Line("position (6DOF) -> %s", now ? "ON" : "OFF");
             });
             g_hotkeys->AddHotkey(VK_F7, []() {
@@ -3359,7 +3451,7 @@ namespace Subnautica2HeadTracking
             });
 #endif
             g_hotkeys->Start();
-            Log::Line("Hotkeys armed: Home/Ctrl+Shift+T=recenter  End/Ctrl+Shift+Y=toggle  PgUp/Ctrl+Shift+G=tracking-mode-cycle  PgDn/Ctrl+Shift+H=yaw-mode(world/local)");
+            Log::Line("Hotkeys armed: End/Ctrl+Shift+Y=toggle  PgUp/Ctrl+Shift+G=tracking-mode-cycle  PgDn/Ctrl+Shift+H=yaw-mode(world/local)");
 #if SN2HT_DEV_HOTKEYS
             Log::Line("Dev hotkeys: F6=mask-diag  F7=inject-mode-next  F8=position-toggle  ScrollLock=hud-dump  Ins/Del=mask-slot  F9=comp-toggle  F10=comp-mode  F11=mark/unmark  F12=clear-marks");
             Log::Line("Inject modes: 0=ALL  1..11=single-caller  12=NONE  13=all-perframe(5-9)  14=all-tier1+2(1-4)");
