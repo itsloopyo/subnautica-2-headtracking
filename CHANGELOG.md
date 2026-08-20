@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.6.0] - 2026-08-20
+
+### Added
+
+- split smoothing into local/remote, drop mod-side centring
+- add build profiles for the 2026-08-20 patch (Steam + GDK)
+
+### Fixed
+
+- harden Lopari pin sync and tag handling in release workflow
+
+### Other
+
+- SN2 patch watch: record buildid 24418064 [skip ci]
+
 ## [Unreleased]
 
 ### Changed
