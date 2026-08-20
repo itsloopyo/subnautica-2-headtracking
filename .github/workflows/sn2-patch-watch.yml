@@ -1,13 +1,11 @@
 name: SN2 patch watch
 
 # Polls Steam daily for a change in Subnautica 2's public branch buildid.
-# When the buildid moves, opens an issue with a rederive checklist and
-# commits the new buildid to .github/sn2-last-known-build.txt so the next
-# run only fires on a further change. This is the "heads up so I can prep
-# a new release" channel; builds::SelectProfile remains the hard backstop
-# that keeps the mod dormant rather than hooking stale RVAs in users'
-# sessions. This watcher sees Steam only - GDK/Game Pass ships the same
-# patch as its own build with its own fingerprint.
+# When the buildid moves, opens a short heads-up issue and commits the new
+# buildid to .github/sn2-last-known-build.txt so the next run only fires on
+# a further change. The issue is a notification only - what to do about it
+# lives in .lab/PATCH-PLAYBOOK.md, which is not tracked. This watcher sees
+# Steam only; Game Pass ships the same patch as its own build.
 
 on:
   schedule:
@@ -97,16 +95,7 @@ jobs:
           - Previous buildid: \`$OLD_DISPLAY\`
           - New buildid:      \`$NEW\`
 
-          ## Rederive checklist
-
-          1. Update SN2 via Steam, then quit it cleanly.
-          2. Run \`pixi run check-fingerprint\` against the updated \`Subnautica2-Win64-Shipping.exe\`. Exit 0 means a committed profile still matches (asset-only patch, the EXE was not relinked) - close this issue, nothing to do. Exit 1 means the EXE changed and the RVAs moved.
-          3. Derive the new RVAs deterministically: \`py -3 scripts/derive_rvas.py <exe>\` (GetPlayerViewPoint, render caller, ObjObjects, FNamePool). Ghidra is the fallback, not the first move - \`pixi run ghidra-script rederive_all\` only if the deterministic pass comes up short. See \`.lab/NOTES.md\` for the playbook and the per-patch history.
-          4. Add a NEW \`kSteamProfile_YYYYMMDD\` to \`src/Subnautica2HeadTracking/builds/steam_offsets.cpp\` and register it at the TOP of \`kKnownProfiles\` in \`builds/build_registry.cpp\`. Append only: never edit or delete an existing profile, or every user who has not taken this patch loses head tracking with no way back.
-          5. Xbox/Game Pass got the same patch as a separate build this watcher cannot see. Dump the running GDK EXE (\`scripts/dump-running-exe.ps1 -RebaseTo 0\`), derive against the dump, and add \`kGdkProfile_YYYYMMDD\` the same way. A GDK package update wipes the mod out of the WinGDK folder, so \`pixi run install\` again before testing.
-          6. Smoke-test in-game on a loaded save, not the title screen - GetPlayerViewPoint does not fire at the menu, so a clean build-check there proves only that the fingerprint matched.
-          7. Bump version and ship via \`pixi run release\`. CHANGELOG entry is an addition ("adds support for build YYYYMMDD"), not a fix.
-          8. Close this issue once the release is out.
+          Next steps: \`.lab/PATCH-PLAYBOOK.md\`.
 
           ---
           Auto-opened by \`.github/workflows/sn2-patch-watch.yml\`.

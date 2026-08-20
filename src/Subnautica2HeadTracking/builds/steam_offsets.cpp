@@ -18,6 +18,146 @@ namespace Subnautica2HeadTracking::builds
     extern const BuildProfile kSteamProfile_20260601;
     extern const BuildProfile kSteamProfile_20260710;
     extern const BuildProfile kSteamProfile_20260714;
+    extern const BuildProfile kSteamProfile_20260820;
+
+    // ---- Steam Win64 build released ~2026-08-20 (buildid 24418064, PE TS 0xae73a557) ----
+    //
+    // First patch that moved STRUCT FIELD OFFSETS, not just RVAs. AActor grew
+    // 0x10 bytes somewhere after RootComponent, so every field past that point
+    // in AActor and in each of its subclasses shifts by +0x10. Confirmed three
+    // ways off the UECodeGen property tables in the EXE, with a negative
+    // control: AController::Pawn 0x2f0 -> 0x300, ACharacter::CapsuleComponent
+    // 0x340 -> 0x350, APlayerController::bShowMouseCursor 0x554 -> 0x564,
+    // while AActor::RootComponent stays at 0x1c0. USceneComponent is on the
+    // UActorComponent branch and did NOT move (verified against the
+    // K2_GetComponentToWorld accessor, which still reads [this+0x1f0]).
+    // Carrying the previous build's PlayerController offsets forward would
+    // have read garbage at every one of them.
+    const BuildProfile kSteamProfile_20260820 = {
+        /* Name        */ "steam-win64-20260820",
+        /* Fingerprint */ { 0xae73a557u, 0x0dc93000u, 0x0d69a7d0u },
+        /* Offsets     */ {
+            /* ZRegInfo */ {
+                /* kAUWEPlayerCameraManager        */ 0,
+                /* kUWEPlayerCameraManagerSettings */ 0,
+                /* kAPlayerCameraManager           */ 0,
+                /* kMinimalViewInfo                */ 0,
+                /* kUWECameraPackage               */ 0,
+            },
+            /* ZConstruct */ {
+                /* kAUWEPlayerCameraManager */ 0,
+                /* kAPlayerCameraManager    */ 0,
+                /* kMinimalViewInfo         */ 0,
+                /* kUWECameraPackage        */ 0,
+            },
+            /* UECodeGen */ {
+                /* kConstructUClass_thunk */ 0,
+                /* kConstructUClass       */ 0,
+                /* kConstructUPackage     */ 0,
+            },
+            /* UWEPlayerCameraManager */ {
+                /* kInstanceSize_Bytes */ 0,
+                /* kClassFlags         */ 0,
+                /* kStaticsRva         */ 0,
+            },
+            // Unchanged: USceneComponent sits on the UActorComponent branch,
+            // which this patch did not touch. GetComponentTransform still
+            // reads the FTransform at [this+0x1f0] (Rotation 0x1f0,
+            // Translation 0x210, Scale 0x230).
+            /* USceneComponentLayout */ {
+                /* kComponentToWorldRotation    */ 0x1f0,
+                /* kComponentToWorldTranslation */ 0x210,
+                /* kComponentToWorldScale       */ 0x230,
+            },
+            // Rebased by the AActor +0x10 delta. kCapsule is
+            // ACharacter::CapsuleComponent, read straight off the property
+            // table. kCapsuleAlias is AActor::RootComponent, which sits before
+            // the insertion point and stays put. Nothing in this group is read
+            // at runtime any more (mask compensation discovers components
+            // structurally), so the rest carry the delta rather than a fresh
+            // probe run.
+            /* PawnSlots */ {
+                /* kCapsule              */ 0x350,
+                /* kCapsuleAlias         */ 0x1c0,
+                /* kPrimaryMesh          */ 0x340,
+                /* kMeshArrayBegin       */ 0x7d8,
+                /* kMeshArrayStride      */ 0x008,
+                /* kMeshArrayCount       */ 6,
+                /* kCameraMountComponent */ 0x868,
+            },
+            // All three moved +0x10 this build - see the header comment.
+            // kPlayerCameraManager is the offset GetPlayerViewPoint itself
+            // dereferences (`mov rcx,[rbx+0x378]` before the CameraCache
+            // TimeStamp test), so it is confirmed by the hook target's own
+            // code, not just the property table. kShowMouseCursorOffset/Mask
+            // come from the property's generated SetBitFunc, which is literally
+            // `or dword ptr [rcx+0x564], 1`.
+            /* PlayerController */ {
+                /* kShowMouseCursorOffset */ 0x564,
+                /* kShowMouseCursorMask   */ 0x1u,
+                /* kPawn                  */ 0x300,
+                /* kPlayerCameraManager   */ 0x378,
+            },
+            // Relocated via scripts/derive_globals.py: allocator sig unique hit
+            // (fn 0x016eadf0), the `mov [rip],rax` @ fn+0x18e. FName decoder
+            // pair at 0x01479bc0/0x01479c30 agree on the pool and
+            // pool - init_flag == 0x267 holds.
+            /* UObjectGlobals */ {
+                /* kObjObjects       */ 0x0cbd8680ULL,
+                /* kObjObjects_Num   */ 0x14,
+                /* kFUObjectItemSize */ 0x18,
+                /* kChunkNumElems    */ 0x10000,
+                /* kFNamePool        */ 0x0caf4480ULL,
+                /* kFNamePoolBlocks  */ 0x10,
+                /* kClassPrivate     */ 0x10,
+                /* kNamePrivate      */ 0x18,
+                /* kOuterPrivate     */ 0x20,
+            },
+            /* VTables */ {
+                /* kCapsuleComponent      */ 0,
+                /* kSkeletalMeshComponent */ 0,
+                /* kCameraMountComponent  */ 0,
+            },
+            // Unchanged, and re-confirmed in the builder: it does
+            // `lea r14,[rdi+0x30]` (FOV) and `lea r8,[rdi+0x18]` (Rotation)
+            // off the same FMinimalViewInfo base it passes to GPV.
+            /* MinimalViewInfoLayout */ {
+                /* kFovOffset      */ 0x30,
+                /* kRotationStride */ 0x18,
+            },
+            // Relocated for the 2026-08-20 build (buildid 24418064) via
+            // scripts/derive_rvas.py. GPV anchored on the relocation-free
+            // prologue signature, 1 hit.
+            //
+            // The GPV VTABLE SLOT also moved this build: 0x828 -> 0x830 (one
+            // virtual inserted before it), and the PlayerCameraManager FOV vfn
+            // alongside it, 0x7f8 -> 0x800. derive_rvas.py hardcodes the old
+            // pair, so its render-caller pass returned zero candidates until
+            // rerun against the new displacements. Recover the slot by finding
+            // the .rdata qwords pointing at the GPV RVA and walking back to the
+            // vtable base (the RTTI locator at base-8 stops the walk).
+            /* kGetPlayerViewPointRva */ 0x043eaa00ULL,
+            /* kKnownCallerRvas */ {{
+                0,
+                // 1: render caller. Containing fn 0x0416eba0 is the
+                // FMinimalViewInfo builder - the only `call [reg+0x830]` site
+                // in the image with the builder window around it:
+                // `call [rax+0x800]` (PCM FOV vfn) -> `movss [r14],xmm0`
+                // (FOV store, r14 = base+0x30) -> `lea r8,[rdi+0x18]`
+                // (out_Rotation) -> `call [rax+0x830]` (GPV).
+                0x0416ede7ULL,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            }},
+        },
+    };
 
     // ---- Steam Win64 build released ~2026-07-14 (buildid 24153994, PE TS 0xa3d114c1) ----
     const BuildProfile kSteamProfile_20260714 = {

@@ -7,10 +7,12 @@ RVAs straight off the PE file using pefile + capstone:
 
   - GetPlayerViewPoint  : the function containing the LEA that loads the
     "APlayerController::GetPlayerViewPoint:" checkf string.
-  - render caller       : the .pdata function that issues `call [reg+0x7f8]`
-    then `call [reg+0x828]` (the camera double-vfn sequence the renderer's
-    FMinimalViewInfo builder runs); retRVA of the +0x828 call is what
-    kKnownCallerRvas[1] needs.
+  - render caller       : the .pdata function that runs the camera double-vfn
+    sequence the renderer's FMinimalViewInfo builder issues; retRVA of the GPV
+    call is what kKnownCallerRvas[1] needs. The vtable slot GPV occupies is
+    derived per build rather than hardcoded - the 2026-08-20 patch inserted a
+    virtual ahead of it and moved it from +0x828 to +0x830, which silently
+    reduced this pass to zero candidates while the old constants were baked in.
   - GUObjectArray.ObjObjects + FNamePool : pinned by their decoder/allocator
     code signatures (the global each references in .data/.bss).
 
@@ -96,6 +98,8 @@ def func_containing(rva):
 
 md = Cs(CS_ARCH_X86, CS_MODE_64)
 md.detail = False
+md_detail = Cs(CS_ARCH_X86, CS_MODE_64)
+md_detail.detail = False
 
 # ---------------------------------------------------------------------------
 # 1. GetPlayerViewPoint via the checkf string xref.
@@ -175,10 +179,15 @@ def derive_gpv():
     return None, {}
 
 # ---------------------------------------------------------------------------
-# 2. Render caller: function with both call [reg+0x7f8] and call [reg+0x828].
+# 2. Render caller: the function that calls the camera FOV vfn and then GPV.
 #    call [reg+disp32] = FF /2 mem, modrm mod=10 rm=reg, disp32.
 #    Encodings: FF 90+rm d d d d (rax..rdi), 41 FF 90+rm ... (r8..r15).
+#
+#    Both displacements are vtable slots, so both move whenever a patch adds a
+#    virtual ahead of them. GPV's slot is read off the vtables that reference
+#    it; the FOV vfn has sat kFovVfnGap below it on every build so far.
 # ---------------------------------------------------------------------------
+kFovVfnGap = 0x30
 def find_vfn_call_sites(disp):
     """Return list of (instr_rva, ret_rva) for every `call [reg+disp]`."""
     sites = []
@@ -204,22 +213,81 @@ def find_vfn_call_sites(disp):
         i += 1
     return sites
 
-def derive_render_caller():
-    sites_828 = find_vfn_call_sites(0x828)
-    sites_7f8 = find_vfn_call_sites(0x7f8)
-    fns_7f8 = set()
-    for rva, _ in sites_7f8:
-        fc = func_containing(rva)
-        if fc:
-            fns_7f8.add(fc[0])
+def derive_gpv_vtable_disp(gpv_rva):
+    """Read GPV's vtable slot displacement off the vtables that reference it.
+
+    Every APlayerController-derived vtable holds a pointer to GPV. Walking back
+    from such a slot while the preceding qword is still a .text pointer lands on
+    the vtable base, because MSVC puts the RTTI complete-object-locator (an
+    .rdata pointer) at base-8. Returns [(disp, count), ...], most common first.
+    """
+    needle = struct.pack("<Q", image_base + gpv_rva)
+    text_lo, text_hi = TEXT_VA, TEXT_END
+
+    def is_text_ptr(rva):
+        b = read_rva(rva, 8)
+        if not b or len(b) != 8:
+            return False
+        v = struct.unpack("<Q", b)[0]
+        return v >= image_base and text_lo <= v - image_base < text_hi
+
+    counts = {}
+    for s in sections:
+        if s["name"] not in (".rdata", ".data"):
+            continue
+        start = 0
+        while True:
+            i = s["data"].find(needle, start)
+            if i == -1:
+                break
+            start = i + 1
+            if i % 8 != 0:
+                continue
+            slot = s["va"] + i
+            base = slot
+            while is_text_ptr(base - 8):
+                base -= 8
+            counts[slot - base] = counts.get(slot - base, 0) + 1
+    return sorted(counts.items(), key=lambda kv: -kv[1])
+
+
+def builder_window(fc, gpv_site, fov_disp):
+    """Check the FMinimalViewInfo-builder shape just before the GPV call.
+
+    `call [reg+fov_disp]` (camera FOV vfn) -> `movss [r14], xmm0` (FOV store)
+    -> `lea r8, [reg+0x18]` (out_Rotation = out_Location + kRotationStride).
+    Returns (has_fov_call, has_fov_store, has_rotation_lea).
+    """
+    b, e = fc
+    code = read_rva(b, e - b)
+    if not code:
+        return (False, False, False)
+    ins = list(md_detail.disasm(code, b))
+    gi = next((k for k, x in enumerate(ins) if x.address == gpv_site), None)
+    if gi is None:
+        return (False, False, False)
+    window = ins[max(0, gi - 40):gi]
+    fov_call = any(x.mnemonic == "call" and ("+ 0x%x]" % fov_disp) in x.op_str
+                   for x in window)
+    fov_store = any(x.mnemonic == "movss" and x.op_str.startswith("dword ptr [r14]")
+                    for x in window)
+    rot_lea = any(x.mnemonic == "lea" and x.op_str.startswith("r8,")
+                  and "+ 0x18]" in x.op_str for x in window)
+    return (fov_call, fov_store, rot_lea)
+
+
+def derive_render_caller(gpv_disp):
+    fov_disp = gpv_disp - kFovVfnGap
+    sites_gpv = find_vfn_call_sites(gpv_disp)
     cands = []
-    for rva, ret in sites_828:
+    for rva, ret in sites_gpv:
         fc = func_containing(rva)
-        if fc and fc[0] in fns_7f8:
-            # confidence: does the fn deref [reg+0x368] (PCM) ?
-            has_368 = func_refs_disp(fc, 0x368)
-            cands.append((fc[0], rva, ret, has_368))
-    return len(sites_828), len(sites_7f8), cands
+        if not fc:
+            continue
+        win = builder_window(fc, rva, fov_disp)
+        if all(win):
+            cands.append((fc[0], rva, ret, win))
+    return len(sites_gpv), fov_disp, cands
 
 def func_refs_disp(fc, disp):
     """True if any instruction in the function has a [reg+disp] memory operand."""
@@ -258,12 +326,35 @@ for fstart, sites in sorted(funcs.items()):
         print("     prologue:", " ".join("%02x" % c for c in prologue))
 print()
 
-print("== render caller (call [reg+0x7f8] -> call [reg+0x828] in one fn) ==")
-n828, n7f8, cands = derive_render_caller()
-print("  call[+0x828] sites: %d   call[+0x7f8] sites: %d" % (n828, n7f8))
-for fstart, csite, ret, has368 in cands:
-    print("  fn 0x%08x  call@0x%08x  retRVA 0x%08x  PCM[+0x368]:%s" %
-          (fstart, csite, ret, "YES" if has368 else "no"))
+print("== GPV vtable slot ==")
+gpv_rva = sorted(funcs)[0] if funcs else None
+gpv_disp = None
+if gpv_rva is None:
+    print("  skipped - GPV not located")
+else:
+    slots = derive_gpv_vtable_disp(gpv_rva)
+    for disp, cnt in slots[:5]:
+        print("  disp 0x%03x (slot %d) in %d vtable(s)" % (disp, disp // 8, cnt))
+    if slots:
+        gpv_disp = slots[0][0]
+        print("  -> using disp 0x%03x" % gpv_disp)
+    else:
+        print("  NOT FOUND - no vtable references GPV")
+print()
+
+print("== render caller (FOV vfn -> FOV store -> out_Rotation lea -> GPV) ==")
+if gpv_disp is None:
+    print("  skipped - no GPV vtable slot")
+else:
+    n_gpv, fov_disp, cands = derive_render_caller(gpv_disp)
+    print("  call[+0x%03x] sites: %d   (FOV vfn expected at +0x%03x)"
+          % (gpv_disp, n_gpv, fov_disp))
+    for fstart, csite, ret, _win in cands:
+        print("  fn 0x%08x  call@0x%08x  retRVA 0x%08x  <- full builder window"
+              % (fstart, csite, ret))
+    if not cands:
+        print("  NO CANDIDATE. If the FOV vfn moved independently of GPV,"
+              " kFovVfnGap needs rederiving.")
 print()
 
 pe.close()

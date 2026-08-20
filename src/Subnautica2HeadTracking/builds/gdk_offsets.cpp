@@ -24,10 +24,126 @@
 
 namespace Subnautica2HeadTracking::builds
 {
+    extern const BuildProfile kGdkProfile_20260820;
     extern const BuildProfile kGdkProfile_20260714;
     extern const BuildProfile kGdkProfile_20260710;
     extern const BuildProfile kGdkProfile_20260602;
     extern const BuildProfile kGdkProfile_20260524;
+
+    // ---- Xbox/GDK package 0.12.3362.0 (PE TS 0x0adc0a4a) ----
+    // Same game patch as steam-win64-20260820, packaged separately. Derived
+    // from a runtime dump (scripts/dump-running-exe.ps1 -RebaseTo 0, which
+    // preserves the PE CheckSum) fed to scripts/derive_rvas.py +
+    // derive_globals.py.
+    //
+    // This patch moved struct field offsets as well as RVAs - AActor grew
+    // 0x10 bytes after RootComponent, so every field past that point in
+    // AActor and its subclasses shifts by +0x10. Each one was re-derived
+    // against the GDK dump independently rather than copied from the Steam
+    // profile, and all of them agree with it: Pawn 0x300,
+    // PlayerCameraManager 0x378 (read out of this build's own GPV),
+    // bShowMouseCursor 0x564 (its generated SetBitFunc is
+    // `or dword ptr [rcx+0x564], 1`), CapsuleComponent 0x350,
+    // RootComponent unmoved at 0x1c0, and ComponentToWorld unmoved at 0x1f0.
+    const BuildProfile kGdkProfile_20260820 = {
+        /* Name        */ "gdk-wingdk-20260820",
+        /* Fingerprint */ { 0x0adc0a4au, 0x0cbab000u, 0x0c5f9b4cu },
+        /* Offsets     */ {
+            /* ZRegInfo */ {
+                /* kAUWEPlayerCameraManager        */ 0,
+                /* kUWEPlayerCameraManagerSettings */ 0,
+                /* kAPlayerCameraManager           */ 0,
+                /* kMinimalViewInfo                */ 0,
+                /* kUWECameraPackage               */ 0,
+            },
+            /* ZConstruct */ {
+                /* kAUWEPlayerCameraManager */ 0,
+                /* kAPlayerCameraManager    */ 0,
+                /* kMinimalViewInfo         */ 0,
+                /* kUWECameraPackage        */ 0,
+            },
+            /* UECodeGen */ {
+                /* kConstructUClass_thunk */ 0,
+                /* kConstructUClass       */ 0,
+                /* kConstructUPackage     */ 0,
+            },
+            /* UWEPlayerCameraManager */ {
+                /* kInstanceSize_Bytes */ 0,
+                /* kClassFlags         */ 0,
+                /* kStaticsRva         */ 0,
+            },
+            // Unchanged. GetComponentTransform (RVA 0x03bea210 this build)
+            // still reads the FTransform at [this+0x1f0].
+            /* USceneComponentLayout */ {
+                /* kComponentToWorldRotation    */ 0x1f0,
+                /* kComponentToWorldTranslation */ 0x210,
+                /* kComponentToWorldScale       */ 0x230,
+            },
+            // Rebased by the AActor +0x10 delta; see the header comment.
+            /* PawnSlots */ {
+                /* kCapsule              */ 0x350,
+                /* kCapsuleAlias         */ 0x1c0,
+                /* kPrimaryMesh          */ 0x340,
+                /* kMeshArrayBegin       */ 0x7d8,
+                /* kMeshArrayStride      */ 0x008,
+                /* kMeshArrayCount       */ 6,
+                /* kCameraMountComponent */ 0x868,
+            },
+            /* PlayerController */ {
+                /* kShowMouseCursorOffset */ 0x564,
+                /* kShowMouseCursorMask   */ 0x1u,
+                /* kPawn                  */ 0x300,
+                /* kPlayerCameraManager   */ 0x378,
+            },
+            // Relocated via scripts/derive_globals.py against the dump:
+            // allocator sig unique hit (fn 0x01502520), FName decoder pair at
+            // 0x0128ef00/0x0128ef70 agreeing on the pool with
+            // pool - init_flag == 0x267.
+            /* UObjectGlobals */ {
+                /* kObjObjects       */ 0x0bbbfb80ULL,
+                /* kObjObjects_Num   */ 0x14,
+                /* kFUObjectItemSize */ 0x18,
+                /* kChunkNumElems    */ 0x10000,
+                /* kFNamePool        */ 0x0badb900ULL,
+                /* kFNamePoolBlocks  */ 0x10,
+                /* kClassPrivate     */ 0x10,
+                /* kNamePrivate      */ 0x18,
+                /* kOuterPrivate     */ 0x20,
+            },
+            /* VTables */ {
+                /* kCapsuleComponent      */ 0,
+                /* kSkeletalMeshComponent */ 0,
+                /* kCameraMountComponent  */ 0,
+            },
+            /* MinimalViewInfoLayout */ {
+                /* kFovOffset      */ 0x30,
+                /* kRotationStride */ 0x18,
+            },
+            // GPV anchored on the relocation-free prologue signature, 1 hit.
+            // The GPV vtable slot moved with this patch on GDK too
+            // (0x828 -> 0x830, and the PCM FOV vfn 0x7f8 -> 0x800), so the
+            // render-caller search has to run against the new displacements.
+            /* kGetPlayerViewPointRva */ 0x0417fc40ULL,
+            /* kKnownCallerRvas */ {{
+                0,
+                // 1: render caller. Containing fn 0x03f03c30 is the
+                // FMinimalViewInfo builder - the only `call [reg+0x830]` site
+                // in the image with the builder window around it:
+                // `call [rax+0x800]` -> `movss [r14],xmm0` (r14 = base+0x30)
+                // -> `lea r8,[rdi+0x18]` -> `call [rax+0x830]`.
+                0x03f03e77ULL,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            }},
+        },
+    };
 
     // ---- Xbox/GDK package 0.12.1347.0 (PE TS 0x7f8917fa) ----
     // Derived from a runtime dump (scripts/dump-running-exe.ps1 -RebaseTo 0,
