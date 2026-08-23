@@ -29,6 +29,8 @@ import bisect
 import pefile
 from capstone import Cs, CS_ARCH_X86, CS_MODE_64
 
+import signatures
+
 EXE = sys.argv[1]
 
 pe = pefile.PE(EXE, fast_load=True)
@@ -136,22 +138,24 @@ def find_lea_targets_to(target_rva):
         i += 1
     return hits
 
-# GPV's first 32 relocation-free prologue bytes (frame setup + `mov edx,0x142`),
-# captured from steam-win64-20260522/20260601. The verbose checkf string that
-# used to anchor GPV is stripped in newer builds, so the prologue signature is
-# the primary anchor. If a future patch reshapes the prologue, re-dump it from
-# the prior known-good Ghidra project via scripts/ghidra/dump_old_signatures.py.
-GPV_PROLOGUE_SIG = bytes.fromhex(
-    "48895c24105556415648" "8d6c24b94881ec90000000" "488bf2488bd9ba42010000")
+# GPV's prologue, generated from a known-good build by make_signatures.py.
+# The verbose checkf string that used to anchor GPV is stripped in newer builds,
+# so the prologue signature is the primary anchor. Those bytes are game code and
+# are not committed - see scripts/signatures.py.
+GPV_PROLOGUE_SIG = signatures.get(signatures.load(), "gpv_prologue")
 
 def scan_text_sig(sig):
+    """sig: list of ints or None (wildcard). Returns list of RVAs."""
     hits = []
+    n = len(sig)
+    fixed = [(i, b) for i, b in enumerate(sig) if b is not None]
     start = 0
     while True:
-        i = TEXT_DATA.find(sig, start)
-        if i == -1:
+        i = TEXT_DATA.find(bytes([sig[0]]), start)
+        if i == -1 or i + n > len(TEXT_DATA):
             break
-        hits.append(TEXT_VA + i)
+        if all(TEXT_DATA[i + k] == b for k, b in fixed):
+            hits.append(TEXT_VA + i)
         start = i + 1
     return hits
 

@@ -57,9 +57,15 @@ if (-not (Test-Path $manifest)) {
 }
 Copy-Item $manifest -Destination $staging
 
+# The installer ZIP is a binary distribution. MinHook (BSD-2-Clause) and
+# cameraunlock-core (MIT) both require their notice to travel with the binary,
+# so a missing notice file fails the build rather than shipping quietly.
 foreach ($doc in "README.md","LICENSE","CHANGELOG.md","THIRD-PARTY-NOTICES.md") {
     $p = Join-Path $projectDir $doc
-    if (Test-Path $p) { Copy-Item $p -Destination $staging }
+    if (-not (Test-Path $p)) {
+        throw "Required document not found: $doc. Every published ZIP is a binary distribution and must carry its licence notices."
+    }
+    Copy-Item $p -Destination $staging
 }
 
 $installerZip = Join-Path $releaseDir "Subnautica2HeadTracking-v$version-installer.zip"
@@ -80,8 +86,26 @@ foreach ($subdir in "Subnautica2\Binaries\Win64", "Subnautica2\Binaries\WinGDK")
     if (Test-Path $ini) { Copy-Item $ini -Destination $deployDir }
     Copy-Item $marks -Destination (Join-Path $deployDir "Subnautica2HeadTracking.marks.txt")
 }
+# The Nexus ZIP carries its own README (manual-install instructions, no
+# install.cmd), so it is staged from scripts/nexus-readme.md rather than the
+# repository README.
 $nexusReadme = Join-Path $projectDir "scripts/nexus-readme.md"
-if (Test-Path $nexusReadme) { Copy-Item $nexusReadme -Destination (Join-Path $nexusStaging "README.md") }
+if (-not (Test-Path $nexusReadme)) {
+    throw "Nexus README not found at $nexusReadme. The Nexus ZIP must ship install instructions."
+}
+Copy-Item $nexusReadme -Destination (Join-Path $nexusStaging "README.md")
+
+# The Nexus ZIP is a binary distribution too: the licences of everything
+# compiled into the payload require their notices to travel with it, so
+# LICENSE and THIRD-PARTY-NOTICES.md ship at its root.
+foreach ($noticeDoc in @('LICENSE', 'THIRD-PARTY-NOTICES.md')) {
+    $noticeSrc = Join-Path $projectDir $noticeDoc
+    if (-not (Test-Path $noticeSrc)) {
+        throw "Required notice file not found: $noticeDoc. Every published ZIP is a binary distribution and must carry it."
+    }
+    Copy-Item $noticeSrc -Destination $nexusStaging -Force
+}
+
 $nexusZip = Join-Path $releaseDir "Subnautica2HeadTracking-v$version-nexus.zip"
 Compress-Archive -Path (Join-Path $nexusStaging "*") -DestinationPath $nexusZip -Force
 Write-Host "Wrote $nexusZip" -ForegroundColor Green

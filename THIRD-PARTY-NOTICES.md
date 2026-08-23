@@ -1,39 +1,208 @@
 # Third-Party Notices
 
-Subnautica 2 Head Tracking bundles and/or depends on the following third-party
-components.
+Subnautica2HeadTracking bundles, statically links, or credits the third-party components
+listed below. Each remains the property of its authors and is used under its own
+licence. Where a licence requires the copyright notice, the conditions and the
+disclaimer to accompany a binary distribution, the full text is reproduced here
+verbatim, and this file ships at the root of every release ZIP we publish.
+
+This repository redistributes no part of Subnautica 2: no game code, no
+extracted assets and no data files. The one piece of game-owned material it
+holds is the README gameplay clip, described under "Subnautica 2 footage"
+below, which ships in neither release ZIP.
+
+| Component | Version | Licence | How it ships |
+|-----------|---------|---------|--------------|
+| MinHook | v1.3.3 (`9fbd087`) | BSD-2-Clause | Compiled into `dxgi.dll` |
+| cameraunlock-core | 3465659888b2270addac9de0b2a728f59a00360c | MIT | Compiled into `dxgi.dll` |
+| OpenTrack | n/a | ISC | Not bundled; UDP protocol interoperability only |
+
+---
 
 ## MinHook
 
-- **Version:** 1.3.3
-- **License:** BSD-2-Clause
-- **Upstream:** https://github.com/TsudaKageyu/minhook
-- **Usage:** Inline function hooking for the camera hook.
-- **Bundled:** no. Statically linked into the mod DLL via cameraunlock-core.
+Fetched from upstream at configure time and compiled into `dxgi.dll`.
+
+- Upstream: https://github.com/TsudaKageyu/minhook
+- Version: `v1.3.3`, pinned in `CMakeLists.txt` as commit
+  `9fbd087432700d73fc571118d6a9697a36443d88`
+- Compiled from upstream sources unmodified
+
+MinHook carries two copyright holders: Tsuda Kageyu for MinHook itself, and
+Vyacheslav Patkov for the Hacker Disassembler Engine that `src/hde/` is built
+from. Both notices appear below exactly as upstream ships them.
+
+```
+MinHook - The Minimalistic API Hooking Library for x64/x86
+Copyright (C) 2009-2017 Tsuda Kageyu.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+
+ 1. Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+ 2. Redistributions in binary form must reproduce the above copyright
+    notice, this list of conditions and the following disclaimer in the
+    documentation and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER
+OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+================================================================================
+Portions of this software are Copyright (c) 2008-2009, Vyacheslav Patkov.
+================================================================================
+Hacker Disassembler Engine 32 C
+Copyright (c) 2008-2009, Vyacheslav Patkov.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+
+ 1. Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+ 2. Redistributions in binary form must reproduce the above copyright
+    notice, this list of conditions and the following disclaimer in the
+    documentation and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE REGENTS OR
+CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+-------------------------------------------------------------------------------
+Hacker Disassembler Engine 64 C
+Copyright (c) 2008-2009, Vyacheslav Patkov.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+
+ 1. Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+ 2. Redistributions in binary form must reproduce the above copyright
+    notice, this list of conditions and the following disclaimer in the
+    documentation and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE REGENTS OR
+CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+---
+
+## cameraunlock-core
+
+Git submodule at `cameraunlock-core/`, compiled into `dxgi.dll`. Our own code,
+MIT licensed, reproduced here so the notices are complete.
+
+- Pinned commit: `3465659888b2270addac9de0b2a728f59a00360c`
+
+```
+MIT License
+
+Copyright (c) 2026 CameraUnlock
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
 
 ---
 
 ## OpenTrack
 
-- **License:** ISC
-- **Upstream:** https://github.com/opentrack/opentrack
-- **Usage:** UDP pose protocol only. No OpenTrack code is included.
-- **Bundled:** no.
+Not bundled and not linked. This mod implements the OpenTrack UDP pose datagram
+layout so that OpenTrack (https://github.com/opentrack/opentrack, ISC licence)
+and compatible trackers can drive it. No OpenTrack code, headers or binaries
+are copied, linked or redistributed, so its licence triggers no notice
+obligation here. It is credited because the wire format is its work.
 
 ---
 
-## CameraUnlock Core
+## Subnautica 2 footage and screenshots
 
-- **License:** MIT
-- **Upstream:** https://github.com/itsloopyo/cameraunlock-core
-- **Usage:** Shared head-tracking processing, math, and rendering helpers.
-- **Bundled:** no. Statically linked into the mod DLL.
+- **File:** `assets/readme-clip.gif` - ten seconds of ordinary gameplay, 800x450.
+- **Rights holder:** Unknown Worlds Entertainment, Inc. and its parent KRAFTON,
+  Inc., together with the rights holders of any third-party marks visible in
+  frame.
+- **Usage:** recorded from the game running with this mod, captured on a
+  legitimately purchased copy, shown so a reader can see what the mod does
+  before installing it.
+- **Bundled:** no. It is kept in this repository only. The packaging scripts
+  copy `README.md`, `LICENSE`, `CHANGELOG.md` and this file, never `assets/`,
+  so the clip is in neither release ZIP nor anything the launcher deploys. The
+  README embeds it by absolute URL so it still resolves for someone reading the
+  copy inside a ZIP.
+- **Licence:** none is granted or implied by this repository. This material is
+  not covered by the MIT licence in `LICENSE`, and nothing here permits reuse
+  of it. Rights holders who would rather it were not published: open an issue
+  or reach us on Discord and it comes down.
 
 ---
 
-## Game
+## Subnautica 2
 
-Subnautica is a trademark of Unknown Worlds Entertainment, Inc. Subnautica 2 is
-developed and published by Unknown Worlds Entertainment. This mod is
-unaffiliated; it requires a legitimately purchased copy of the game and does
-not contain, redistribute, or modify any game assets or proprietary code.
+Subnautica 2 and all related names, logos, characters and marks are trademarks
+of their respective owners. They are used here only to identify the game this
+mod applies to, which is nominative use and not a claim of any right in them.
+This project is an unofficial, fan-made modification. It is not affiliated
+with, endorsed by, or sponsored by the game's developers, its publishers, its
+engine vendor, or any other rights holder. It requires a legitimately
+purchased copy of the game, and it contains no game code, no extracted game
+assets, no game data files and no proprietary DLLs. The sole piece of
+game-owned material in this repository is the README gameplay clip covered in
+the previous section, which is redistributed in no release.
+
+The mod locates the engine structures it reads by recording their addresses and
+field offsets: RVAs and struct offsets in `src/Subnautica2HeadTracking/builds/`,
+and UObject class, property and function names looked up by name at runtime.
+Those were derived by the authors through independent analysis of a
+legitimately owned copy, and they are factual measurements about where things
+sit, recorded as numbers and names. No game code is stored here in any form -
+no decompiled source, no disassembly, and no copied byte sequences. The
+derivation scripts under `scripts/` match against prologue bytes of the game's
+own functions, so those bytes are generated locally from the reader's own
+installed copy by `scripts/make_signatures.py` into a gitignored file, and are
+never committed.

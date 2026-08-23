@@ -24,7 +24,15 @@ Subnautica2/
       dxgi.dll
       HeadTracking.ini
       Subnautica2HeadTracking.marks.txt
+LICENSE
+THIRD-PARTY-NOTICES.md
+README.md
 ```
+
+`LICENSE` and `THIRD-PARTY-NOTICES.md` sit at the ZIP root rather than in
+the game folders - they cover the mod and the third-party code compiled
+into it. Extracting them alongside the rest is harmless; they are
+documentation, not files the game loads.
 
 ## Where to extract
 
@@ -133,3 +141,13 @@ CENTER in Headcam, or the equivalent in whatever you run.
 For configuration, OpenTrack setup, and troubleshooting, see the full
 README in the project's GitHub repo:
 https://github.com/itsloopyo/subnautica-2-headtracking
+
+## Licence and credits
+
+This mod is MIT licensed - see the bundled `LICENSE`. It statically links
+MinHook (BSD-2-Clause) and our own CameraUnlock shared core (MIT); both
+notices are reproduced in the bundled `THIRD-PARTY-NOTICES.md`.
+
+Subnautica 2 is developed by Unknown Worlds Entertainment. This mod is
+unofficial and unaffiliated, it ships no game code or assets, and it
+requires a legitimately purchased copy of the game.

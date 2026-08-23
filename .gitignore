@@ -15,6 +15,9 @@ libs/
 .headtracking-state.json
 scratch/
 /Subnautica2HeadTracking.marks.txt
+# Prologue bytes of the game's own functions, generated locally by
+# scripts/make_signatures.py. Game code - never commit it.
+scripts/signatures.local.json
 scripts/dump-running-exe.ps1
 CMakeCache.txt
 CMakeFiles/

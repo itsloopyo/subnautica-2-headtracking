@@ -2,7 +2,7 @@
 """Relocate GUObjectArray.ObjObjects and FNamePool for a patched SN2 EXE.
 
 Locates the FUObjectArray allocator and the FName decoder by masked byte
-signatures (taken from the old build's relocation-free prologue bytes), then
+signatures generated from a known-good build (see make_signatures.py), then
 capstone-decodes each to read the rip-relative global it references:
 
   ObjObjects : the unique `mov qword [rip+x], rax` in the allocator
@@ -19,6 +19,8 @@ import struct
 import pefile
 from capstone import Cs, CS_ARCH_X86, CS_MODE_64
 from capstone.x86 import X86_OP_MEM, X86_REG_RIP
+
+import signatures
 
 EXE = sys.argv[1]
 pe = pefile.PE(EXE, fast_load=True)
@@ -45,13 +47,9 @@ def masked_scan(sig):
         start = i + 1
     return hits
 
-def h(s):
-    return [None if x == "??" else int(x, 16) for x in s.split()]
-
-ALLOC_SIG = h("48 89 5c 24 20 55 56 57 48 83 ec 50 48 8d 15 ?? ?? ?? ?? "
-              "48 8d 4c 24 30 e8 ?? ?? ?? ?? 33 db c7 84 24 80 00 00 00 00 00 20 00")
-DECODER_SIG = h("48 89 5c 24 10 57 48 83 ec 20 80 3d ?? ?? ?? ?? 00 48 8b fa "
-                "8b 19 74 09 4c 8d 05 ?? ?? ?? ?? eb 16")
+SIGS = signatures.load()
+ALLOC_SIG = signatures.get(SIGS, "objobjects_allocator")
+DECODER_SIG = signatures.get(SIGS, "fname_decoder")
 
 def disasm(fn_rva, length=0x300):
     code = D[fn_rva - TVA: fn_rva - TVA + length]
