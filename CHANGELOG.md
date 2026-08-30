@@ -1,21 +1,14 @@
 # Changelog
 
-## [0.6.0] - 2026-08-20
+## [Unreleased]
 
 ### Added
 
-- split smoothing into local/remote, drop mod-side centring
-- add build profiles for the 2026-08-20 patch (Steam + GDK)
-
-### Fixed
-
-- harden Lopari pin sync and tag handling in release workflow
-
-### Other
-
-- SN2 patch watch: record buildid 24418064 [skip ci]
-
-## [Unreleased]
+- `scripts/derive_rvas.py` + `scripts/derive_globals.py`: deterministic
+  RVA re-derivation via pefile + capstone (PE signature scan + .pdata
+  function table), independent of Ghidra full analysis. Ghidra's analysis
+  repeatedly OOM'd/under-analyzed this 225MB UE5 binary; the signature
+  approach relocates GPV / render caller / ObjObjects / FNamePool in seconds.
 
 ### Changed
 
@@ -45,13 +38,38 @@
   `Subnautica2HeadTracking.prev.log`, and uninstall removes it.
 
 - The mod no longer keeps a centre of its own and applies the tracker pose as
-  absolute. Every tracker app centres itself, so a mod-side centre sat in series
+  absolute. The tracker app owns centring, so a mod-side centre sat in series
   with the tracker's and the two drifted apart. Centre in your tracker app
   instead. The recentre hotkey (Home / Ctrl+Shift+T) and the tracker-app
   recentre request handling are gone with it.
 - smoothing is now two keys in `[Tracking]`: `LocalSmoothing` (default 0.0) for a tracker running on this machine and `RemoteSmoothing` (default 0.15) for a remote device on the network, selected per connection from the packet source address
 - removed `[Tracking] Smoothing` and `[Position] Smoothing`; both rotation and position use the same pair of values
 - removed the hidden 0.15 baseline smoothing floor, so a local tracker now gets zero-latency tracking by default
+
+### Fixed
+
+- Support the 2026-06-01 Steam build (PE ts 0x72247abc). The patch relinked
+  the EXE, so the build-fingerprint failsafe disabled the mod (it correctly
+  refused to hook stale RVAs). Added build profile `steam-win64-20260601`
+  with re-derived RVAs (GPV 0x043ee420, render caller retRVA 0x04172827,
+  ObjObjects 0x0cd23980, FNamePool 0x0cc3f780); older profiles retained.
+- Build-mismatch log no longer claims "OLDER/NEWER" - SN2's PE TimeDateStamp
+  is a deterministic-build hash, not a timestamp, so direction is meaningless.
+
+## [0.6.0] - 2026-08-20
+
+### Added
+
+- split smoothing into local/remote, drop mod-side centring
+- add build profiles for the 2026-08-20 patch (Steam + GDK)
+
+### Fixed
+
+- harden Lopari pin sync and tag handling in release workflow
+
+### Other
+
+- SN2 patch watch: record buildid 24418064 [skip ci]
 
 ## [0.5.0] - 2026-08-03
 
@@ -166,26 +184,6 @@
 ### Other
 
 - Add steam-win64-20260601 build profile
-
-## [Unreleased]
-
-### Fixed
-
-- Support the 2026-06-01 Steam build (PE ts 0x72247abc). The patch relinked
-  the EXE, so the build-fingerprint failsafe disabled the mod (it correctly
-  refused to hook stale RVAs). Added build profile `steam-win64-20260601`
-  with re-derived RVAs (GPV 0x043ee420, render caller retRVA 0x04172827,
-  ObjObjects 0x0cd23980, FNamePool 0x0cc3f780); older profiles retained.
-- Build-mismatch log no longer claims "OLDER/NEWER" - SN2's PE TimeDateStamp
-  is a deterministic-build hash, not a timestamp, so direction is meaningless.
-
-### Added
-
-- `scripts/derive_rvas.py` + `scripts/derive_globals.py`: deterministic
-  RVA re-derivation via pefile + capstone (PE signature scan + .pdata
-  function table), independent of Ghidra full analysis. Ghidra's analysis
-  repeatedly OOM'd/under-analyzed this 225MB UE5 binary; the signature
-  approach relocates GPV / render caller / ObjObjects / FNamePool in seconds.
 
 ## [0.2.1] - 2026-05-28
 

@@ -113,6 +113,17 @@ target_compile_definitions(${MOD_NAME} PRIVATE
     SN2HT_GIT_SHA="${SN2HT_GIT_SHA}"
 )
 
+option(SN2HT_DEV_HOTKEYS "Build the discovery/tuning diagnostic hotkeys (developer aid, not for release)" OFF)
+if(SN2HT_DEV_HOTKEYS)
+    target_compile_definitions(${MOD_NAME} PRIVATE SN2HT_DEV_HOTKEYS=1)
+    message(WARNING "SN2HT_DEV_HOTKEYS is ON. This build registers F3/F4 tooltip "
+                    "follow-scale tuning, F6 mask diagnostics, F7 inject-mode cycling, "
+                    "F8 standalone position toggle, F9/F10 mask compensation toggle and "
+                    "mode, F11/F12 mask mark and clear, ScrollLock HUD dump, and "
+                    "Insert/Delete mask-slot selection. Cycling the inject mode can "
+                    "leave the view not following the head. Do not ship it.")
+endif()
+
 if(MSVC)
     target_compile_options(${MOD_NAME} PRIVATE /W4 /WX /wd4324)
 endif()
