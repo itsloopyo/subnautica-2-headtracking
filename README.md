@@ -1,8 +1,8 @@
 # Subnautica 2 Head Tracking
 
-An unofficial decoupled look+aim head tracking mod for Subnautica 2, look around naturally with your head while your mouse or controller controls your aim, with no VR headset required.
+![Subnautica 2 running with this mod](https://raw.githubusercontent.com/itsloopyo/subnautica-2-headtracking/main/assets/readme-clip.gif)
 
-![Mod GIF](https://raw.githubusercontent.com/itsloopyo/subnautica-2-headtracking/main/assets/readme-clip.gif)
+An unofficial head tracking mod for Subnautica 2 that moves the view with your head while your mouse or controller keeps aiming, driven by OpenTrack over UDP, with no VR headset required.
 
 ## Features
 
@@ -110,28 +110,64 @@ copy "C:\Windows\System32\dxgi.dll" "C:\XboxGames\Subnautica 2\Content\Subnautic
 
 ## Setting Up OpenTrack
 
-In OpenTrack, set the **Output** to "UDP over network" and target
-`127.0.0.1:4242`. That is all the mod needs - it listens for the standard
-OpenTrack UDP packet stream.
+The mod listens for OpenTrack pose data on UDP port `4242`, on every network
+interface. One datagram is six little-endian 64-bit floats in the order
+`x, y, z, yaw, pitch, roll`: position in centimetres, rotation in degrees, 48
+bytes in total. Anything that sends that to that port drives the view.
+OpenTrack's **UDP over network** output sends exactly this, and the steps below
+set it up.
 
-### VR Headset Setup
+1. Install [OpenTrack](https://github.com/opentrack/opentrack/releases).
+2. Pick a tracker under **Input**, using the notes below.
+3. Set **Output** to **UDP over network**, host `127.0.0.1`, port `4242`.
+4. Press **Start**. Tracking and the game can start in either order.
 
-1. Connect your headset to the PC with Air Link or Virtual Desktop and start SteamVR.
-2. In OpenTrack, choose the SteamVR input plugin so it reads your headset pose.
-3. Set Output to UDP over network, `127.0.0.1:4242`.
+### Webcam
 
-### Webcam Setup
+OpenTrack ships a `neuralnet tracker` input that reads a plain webcam. Select it
+under **Input**, pick your camera in its settings, and use the output settings
+above. How well it tracks depends on your camera and your lighting, so try it
+before buying anything.
 
-1. In OpenTrack, set the input to the `neuralnet` tracker.
-2. Aim your webcam at your face and calibrate per the OpenTrack tracker guide.
-3. Set Output to UDP over network, `127.0.0.1:4242`.
+### Phone
 
-### Phone App Setup
+A phone app can reach the mod directly, with no OpenTrack on the PC, if it sends
+the datagram described above. Point it at this PC's IP address (run `ipconfig`
+to find it) on port `4242`. Not every phone tracker speaks this protocol, so
+check yours for an OpenTrack or UDP output option first. [Headcam](https://headcam.app)
+sends it, and I wrote it so decent tracking is free for anyone who already owns
+a phone.
 
-If your phone app smooths its own output, send directly to your PC on
-port `4242`. If you want OpenTrack's curve mapping and filtering, point
-the app at a local OpenTrack instance and let OpenTrack relay to
+Sending direct works when the app filters its own signal on the device. The
+mod's smoothing is sized to take the edge off a clean signal rather than to
+rescue a noisy one, so a raw feed sent direct will jitter. If it does, point the
+app at OpenTrack's **UDP over network** *input* on some other port, say 5252,
+and let OpenTrack's filters and curves clean it up before its output forwards to
 `127.0.0.1:4242`.
+
+Anything arriving from outside `127.0.0.0/8` counts as a remote connection and
+is smoothed with `RemoteSmoothing` rather than `LocalSmoothing`. That includes a
+tracker on this very PC that sends to the machine's own LAN address, because the
+mod reads the source address and not the machine.
+
+### Headset or other hardware
+
+If your device has an OpenTrack input driver, select it under **Input** and use
+the same output settings. OpenTrack's own **Input** list is the authority on
+what it can read; the mod only ever sees what OpenTrack sends.
+
+### Centring
+
+Centring belongs to your tracker. The mod subtracts no centre of its own: it
+applies the pose it receives exactly as it arrives, so a stream of zeros holds
+the view where the game itself puts it. Press the centre control in your tracker
+(OpenTrack's **Center** bind, or the CENTER button in Headcam) and the tracker
+zeroes its own output, which leaves the view centred with the mod doing nothing.
+
+That is why there is no centre hotkey here and nothing to re-centre in game. Two
+centres in series would drift apart, because each side re-centres at moments the
+other cannot see, and you would end up pressing twice to centre once. If the
+view sits off to one side, centre it in the tracker.
 
 ## Controls
 
