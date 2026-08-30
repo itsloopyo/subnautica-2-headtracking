@@ -11,6 +11,10 @@
 ::   /y / -y / --yes: non-interactive (skip the trailing pause).
 ::   /force / --force: discard .backup files instead of restoring them.
 :: ============================================
+::
+:: Deliberately not a thin wrapper over cameraunlock-core/scripts/uninstall-body.cmd.
+:: It walks the same Steam and Xbox/Game Pass installs install.ps1 deployed to.
+:: See install.cmd for the full reasoning.
 
 setlocal enabledelayedexpansion
 

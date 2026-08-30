@@ -130,3 +130,19 @@ set_target_properties(${MOD_NAME} PROPERTIES
     SUFFIX ".dll"
     OUTPUT_NAME "dxgi"
 )
+
+# Behaviour lock for the lean boundary and for the shipped INI agreeing with
+# the code defaults. A separate executable linking none of the hook machinery,
+# so `pixi run test` runs anywhere the mod builds, with no game installed.
+option(SN2HT_BUILD_TESTS "Build the position behaviour tests" ON)
+if(SN2HT_BUILD_TESTS)
+    add_executable(sn2ht_position_tests tests/position_tests.cpp)
+    target_include_directories(sn2ht_position_tests PRIVATE
+        src/Subnautica2HeadTracking
+        cameraunlock-core/cpp/include
+    )
+    target_compile_definitions(sn2ht_position_tests PRIVATE
+        SN2HT_SHIPPED_INI="${CMAKE_CURRENT_SOURCE_DIR}/HeadTracking.ini"
+    )
+    target_link_libraries(sn2ht_position_tests PRIVATE cameraunlock)
+endif()

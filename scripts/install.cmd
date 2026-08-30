@@ -11,6 +11,14 @@
 ::   GAME_PATH (optional positional): force a single install target.
 ::   /y / -y / --yes: non-interactive (skip the trailing pause).
 :: ============================================
+::
+:: Deliberately not a thin wrapper over cameraunlock-core's shared install bodies.
+:: install.ps1 deploys to every install it finds at once: Steam and Xbox/Game
+:: Pass, whose exe directories are Subnautica2\Binaries\Win64 and
+:: Subnautica2\Binaries\WinGDK, where a shared body resolves one game path and
+:: deploys there. It also plants %SystemRoot%\System32\dxgi.dll as dxgi_orig.dll
+:: for the proxy to forward to, which is not a backup of anything the game shipped
+:: and has no equivalent in install-body-shim.cmd.
 
 :: Release-contract token: release.ps1 bumps this string, release.yml hard-fails
 :: if it disagrees with the pushed tag. The value isn't read at install time

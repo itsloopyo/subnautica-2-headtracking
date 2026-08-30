@@ -22,6 +22,9 @@ setup = { cmd = """
 build = { cmd = "cmake --build build --config Release", depends-on = ["setup"] }
 build-debug = { cmd = "cmake --build build --config Debug", depends-on = ["setup"] }
 
+# Lean-boundary and shipped-INI behaviour locks. Needs no game install.
+test = { cmd = "build/Release/sn2ht_position_tests.exe", depends-on = ["build"] }
+
 install = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/deploy.ps1 Release", depends-on = ["build"] }
 uninstall = "powershell -ExecutionPolicy Bypass -File scripts/uninstall.ps1"
 

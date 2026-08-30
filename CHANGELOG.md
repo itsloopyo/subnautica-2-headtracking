@@ -19,6 +19,19 @@
 
 ### Changed
 
+- The `[Position]` Z keys now mean what they say. The mod shipped
+  `InvertZ = true` with `LimitZ` and `LimitZBack` swapped: the two errors
+  cancelled, so the lean was correct, but `LimitZ` named the backward limit here
+  and the forward limit in every other mod, and clearing `InvertZ` on its own
+  reversed the budgets while the direction still looked right. Depth is now
+  negated at the engine boundary, `InvertZ` defaults false, and `LimitZ = 0.40`
+  is the forward lean with `LimitZBack = 0.10` the backward one. An existing
+  `HeadTracking.ini` carrying the old triple needs those three keys updated;
+  deleting the file lets the installer reseed it.
+- `LimitY` now reaches both vertical bounds. The clamp is
+  `[-LimitYDown, +LimitY]` and the downward bound carried its own 0.20 m
+  default, so raising `LimitY` widened upward travel alone.
+
 - Three render-path log lines were gated on a call count, which runs at the
   player's frame rate: `mask-comp` every 120 calls and `pos #` / `hook #` every
   600 cost 300-780 KB and 120-280 KB an hour respectively, more on a fast

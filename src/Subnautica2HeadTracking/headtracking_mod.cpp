@@ -19,6 +19,7 @@
 
 #include "builds/build_registry.h"
 #include "aim_projection.h"
+#include "position_boundary.h"
 
 #include "cameraunlock/config/ini_reader.h"
 #include "cameraunlock/diagnostics/crash_handler.h"
@@ -2091,10 +2092,8 @@ namespace Subnautica2HeadTracking
             const FVector camFwd   = QuatRotateVec(baseQ, FVector{1.0, 0.0, 0.0});
             const FVector camRight = QuatRotateVec(baseQ, FVector{0.0, 1.0, 0.0});
             const FVector camUp    = QuatRotateVec(baseQ, FVector{0.0, 0.0, 1.0});
-            constexpr double kMetersToUE = 100.0;
-            const double s = static_cast<double>(off.z) * kMetersToUE;  // surge -> forward
-            const double r = static_cast<double>(off.x) * kMetersToUE;  // sway  -> right
-            const double u = static_cast<double>(off.y) * kMetersToUE;  // heave -> up
+            double s = 0.0, r = 0.0, u = 0.0;  // surge -> forward, sway -> right, heave -> up
+            Subnautica2HeadTracking::Position::TrackerOffsetToUE(off, s, r, u);
             outOffsetUE.X = camFwd.X * s + camRight.X * r + camUp.X * u;
             outOffsetUE.Y = camFwd.Y * s + camRight.Y * r + camUp.Y * u;
             outOffsetUE.Z = camFwd.Z * s + camRight.Z * r + camUp.Z * u;
@@ -2941,17 +2940,21 @@ namespace Subnautica2HeadTracking
             int udpPort = cameraunlock::UdpReceiver::kDefaultPort;
             {
                 // SN2 axis mapping: tracker x/z are mirrored relative to the
-                // clean-camera basis. The processor clamps z to
-                // [-limit_z, +limit_z_back] assuming negative z = forward;
-                // invert_z flips that, so forward is now +z and would hit the
-                // restricted limit_z_back. The defaults swap the two bounds so
-                // the generous 0.40 stays on forward and the restricted 0.10
-                // on backward (the INI ships the swapped values too).
+                // clean-camera basis, and both mirrors live in
+                // position_boundary.h, past the clamp. See the header for why
+                // the depth mirror cannot be an invert_z.
+                namespace pd = Subnautica2HeadTracking::Position;
                 cameraunlock::PositionSettings ps = g_posProcessor.GetSettings();
-                ps.invert_x = true;
-                ps.invert_z = true;
-                ps.limit_z = 0.10f;
-                ps.limit_z_back = 0.40f;
+                ps.sensitivity_x = pd::kSensitivityX;
+                ps.sensitivity_y = pd::kSensitivityY;
+                ps.sensitivity_z = pd::kSensitivityZ;
+                ps.invert_x = pd::kInvertX;
+                ps.invert_y = pd::kInvertY;
+                ps.invert_z = pd::kInvertZ;
+                ps.limit_x = pd::kLimitX;
+                pd::ApplyVerticalLimit(ps, pd::kLimitY);
+                ps.limit_z = pd::kLimitZ;
+                ps.limit_z_back = pd::kLimitZBack;
 
                 // The position stream is true 6DOF anchored at the eyes: the
                 // rotation-induced eye swing in the data is real camera motion
@@ -2999,7 +3002,7 @@ namespace Subnautica2HeadTracking
                     ps.invert_y      = ini.ReadBool("Position", "InvertY", ps.invert_y);
                     ps.invert_z      = ini.ReadBool("Position", "InvertZ", ps.invert_z);
                     ps.limit_x       = ini.ReadFloat("Position", "LimitX", ps.limit_x);
-                    ps.limit_y       = ini.ReadFloat("Position", "LimitY", ps.limit_y);
+                    pd::ApplyVerticalLimit(ps, ini.ReadFloat("Position", "LimitY", ps.limit_y));
                     ps.limit_z       = ini.ReadFloat("Position", "LimitZ", ps.limit_z);
                     ps.limit_z_back  = ini.ReadFloat("Position", "LimitZBack", ps.limit_z_back);
                     // No position smoothing key: position uses the same

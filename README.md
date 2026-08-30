@@ -234,19 +234,17 @@ SensitivityX = 1.0
 SensitivityY = 1.0
 SensitivityZ = 1.0
 ; sideways lean direction
-InvertX = true
+InvertX = false
 ; vertical move direction
 InvertY = false
 ; forward/back lean direction
-InvertZ = true
+InvertZ = false
 LimitX = 0.30          ; max sideways lean in meters
 LimitY = 0.20          ; max vertical move in meters
-; Z limits are swapped because InvertZ = true: with inversion, forward maps to
-; +z (the LimitZBack bound) and backward maps to -z (the LimitZ bound). Keeping
-; forward generous (0.40) and backward restricted (0.10) avoids clipping through
-; the player, so LimitZBack holds the generous value here.
-LimitZ = 0.10          ; backward lean limit in meters
-LimitZBack = 0.40      ; forward lean limit in meters
+; Asymmetric on purpose: leaning in gets the generous 0.40, leaning back the
+; restricted 0.10 so the camera cannot pull through the player model.
+LimitZ = 0.40          ; forward lean limit in meters
+LimitZBack = 0.10      ; backward lean limit in meters
 
 [Hotkeys]
 ; Toggle tracking (End) and cycle tracking mode (Page Up) are fixed, each also
