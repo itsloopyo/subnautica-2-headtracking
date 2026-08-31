@@ -15,10 +15,10 @@ inline constexpr float kSensitivityZ = 1.0f;
 inline constexpr bool  kInvertX = false;
 inline constexpr bool  kInvertY = false;
 inline constexpr bool  kInvertZ = false;
-inline constexpr float kLimitX = 0.30f;
-inline constexpr float kLimitY = 0.20f;
-inline constexpr float kLimitZ = 0.40f;
-inline constexpr float kLimitZBack = 0.10f;
+inline constexpr float kLimitX = cameraunlock::PositionSettings{}.limit_x;
+inline constexpr float kLimitY = cameraunlock::PositionSettings{}.limit_y;
+inline constexpr float kLimitZ = cameraunlock::PositionSettings{}.limit_z;
+inline constexpr float kLimitZBack = cameraunlock::PositionSettings{}.limit_z_back;
 
 // Apply the INI's single vertical limit to both vertical bounds.
 //
