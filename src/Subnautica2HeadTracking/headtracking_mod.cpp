@@ -1531,16 +1531,149 @@ namespace Subnautica2HeadTracking
         }
 #endif
 
-        // True during gameplay (head-tracking reticle should be drawn), false
-        // in UI contexts: main menu, PDA, pause. Reads APlayerController::
-        // bShowMouseCursor directly off the hook's `self` - the cursor is shown
-        // in every UI mode and hidden during play. This sidesteps the
-        // widget-visibility approach, which couldn't distinguish the painted
-        // on-screen reticle from always-"Visible" UMG widget-tree templates.
+        // Check the active profile's struct field offsets against the live
+        // objects they claim to name.
+        //
+        // A stale RVA crashes, gets reported, and gets fixed. A stale struct
+        // offset does neither: the 2026-08-20 patch moved bShowMouseCursor by
+        // 0x10, the old offset read a constant zero, InGameplay() returned true
+        // everywhere, and tracking simply never suppressed in menus. No fault,
+        // no log line, nothing to attribute it to. This turns that class of
+        // failure into a message.
+        //
+        // It verifies, it does not discover: every offset here comes from the
+        // matched profile, and nothing scans the game image for a replacement.
+        // Store-agnostic by construction - it reads the ACTIVE profile plus the
+        // live UObject graph, so Steam and WinGDK take the same path with no
+        // per-store branch.
+        //
+        // PlayerCameraManager is the gate, and the ordering is the whole trick.
+        // Until it resolves, the controller may simply not be wired up yet and
+        // nothing downstream is worth judging, so everything is inconclusive.
+        // Once it HAS resolved, the controller is live and FName reads work, so
+        // a field that will not resolve is a wrong field rather than an early
+        // one, and the same reading becomes a mismatch. Without that ordering
+        // the check is worthless: a badly stale offset reads garbage, garbage
+        // does not name itself, and "cannot tell" stays indistinguishable from
+        // "too early" forever - silent, which is the bug being fixed.
+        enum class OffsetCheck { Inconclusive, Pass, Mismatch };
+
+        // Consecutive mismatching observations required before acting. A single
+        // bad reading during a level teardown must never disable a working mod,
+        // and a genuinely wrong offset is wrong on every call, so waiting costs
+        // nothing.
+        constexpr int kOffsetMismatchStreak = 120;
+        // Attempts after which never having concluded is itself worth saying.
+        constexpr int kOffsetVerifyBudget = 20000;
+
+        // Set when the check has reached a verdict OR given up. It gates the
+        // work, not just the logging: ClassName() walks FNamePool, and the hook
+        // runs a couple of thousand times a second, so a check that never
+        // concludes must stop running rather than pay that cost forever on
+        // exactly the broken build where things are already wrong.
+        std::atomic<bool> g_offsetCheckDone{false};
+        std::atomic<int>  g_offsetMismatchStreak{0};
+        std::atomic<int>  g_offsetCheckAttempts{0};
+
+        // A UObject we can name is a UObject: a stale offset lands on a float,
+        // a packed bool, or an interior pointer, none of which resolve through
+        // ClassPrivate to a printable class name.
+        bool NamesAsObject(std::uintptr_t obj, std::string& classNameOut)
+        {
+            if (!obj) return false;
+            std::uintptr_t cls = 0;
+            if (!SafeReadPtr(obj + Offsets().UObjectGlobals.kClassPrivate, cls) || !cls)
+                return false;
+            classNameOut = ClassName(obj);
+            return !classNameOut.empty();
+        }
+
+        OffsetCheck VerifyProfileOffsets(std::uintptr_t controller)
+        {
+            const auto& off = Offsets();
+            // The streak has to run to kOffsetMismatchStreak before anything
+            // acts, so the detail is logged on the first failing observation
+            // only. 120 identical lines would bury the log this is asking the
+            // user to send.
+            const bool report =
+                g_offsetMismatchStreak.load(std::memory_order_relaxed) == 0;
+
+            // The gate. GetPlayerViewPoint dereferences this exact offset, and
+            // every engine and game camera manager carries "CameraManager" in
+            // its class name (APlayerCameraManager, AUWEPlayerCameraManager).
+            std::uintptr_t camMgr = 0;
+            SafeReadPtr(controller + off.PlayerController.kPlayerCameraManager, camMgr);
+            std::string camCls;
+            if (!NamesAsObject(camMgr, camCls)) return OffsetCheck::Inconclusive;
+            if (camCls.find("CameraManager") == std::string::npos) {
+                if (report) Log::Line("offset-check: FAIL PlayerCameraManager +0x%zx -> class '%s', "
+                          "expected a *CameraManager",
+                          off.PlayerController.kPlayerCameraManager, camCls.c_str());
+                return OffsetCheck::Mismatch;
+            }
+
+            // Past the gate. A null Pawn is still legitimate - a controller can
+            // have none - but anything else here is a wrong offset.
+            std::uintptr_t pawn = 0;
+            SafeReadPtr(controller + off.PlayerController.kPawn, pawn);
+            if (!pawn) return OffsetCheck::Inconclusive;
+
+            std::string pawnCls;
+            if (!NamesAsObject(pawn, pawnCls)) {
+                if (report) Log::Line("offset-check: FAIL Pawn +0x%zx -> 0x%llx, which does not "
+                          "resolve to a UObject",
+                          off.PlayerController.kPawn,
+                          static_cast<unsigned long long>(pawn));
+                return OffsetCheck::Mismatch;
+            }
+
+            // Checked two levels deep on purpose. A one-level "is it a UObject"
+            // test is weak here, because an offset stale by 0x10 lands on a
+            // neighbouring object pointer that names itself perfectly well.
+            // Requiring the pawn's own AActor::RootComponent to resolve to a
+            // *Component makes an accidental pass need two unrelated fields to
+            // line up at once.
+            std::uintptr_t pawnRoot = 0;
+            SafeReadPtr(pawn + off.PawnSlots.kCapsuleAlias, pawnRoot);
+            std::string rootCls;
+            if (!NamesAsObject(pawnRoot, rootCls)
+                || rootCls.find("Component") == std::string::npos) {
+                if (report) Log::Line("offset-check: FAIL Pawn +0x%zx ('%s') RootComponent +0x%zx "
+                          "-> '%s', expected a *Component",
+                          off.PlayerController.kPawn, pawnCls.c_str(),
+                          off.PawnSlots.kCapsuleAlias,
+                          rootCls.empty() ? "<unresolved>" : rootCls.c_str());
+                return OffsetCheck::Mismatch;
+            }
+
+            // bShowMouseCursor gets no check here. It is one bit in a packed
+            // bitfield with no type to interrogate, and its stale reading is
+            // zero, which is also its legal in-play value - static inspection
+            // cannot tell those apart. It gets the heartbeat cursor-bit report
+            // instead; see g_cursorBitsSeen.
+            Log::Line("offset-check: PASS  PlayerCameraManager +0x%zx -> %s | "
+                      "Pawn +0x%zx -> %s | RootComponent +0x%zx -> %s",
+                      off.PlayerController.kPlayerCameraManager, camCls.c_str(),
+                      off.PlayerController.kPawn, pawnCls.c_str(),
+                      off.PawnSlots.kCapsuleAlias, rootCls.c_str());
+            return OffsetCheck::Pass;
+        }
+
+        // Every bit ever seen set in the packed bitfield that holds
+        // bShowMouseCursor. VerifyProfileOffsets cannot check this offset -
+        // it is one bit with no type to interrogate, and a stale read gives
+        // zero, which is also its legal in-play value. What does distinguish
+        // them is a whole session: the player cannot reach gameplay without
+        // passing a menu, so a run that never once saw the cursor bit set has
+        // a stale offset. Reported in the heartbeat so it is answerable from a
+        // log the user sends, rather than needing a repro.
+        std::atomic<std::uint32_t> g_cursorBitsSeen{0};
+
         bool InGameplay(std::uintptr_t controller) {
             std::uint32_t v = 0;
             if (!SafeReadU32(controller + Offsets().PlayerController.kShowMouseCursorOffset, v))
                 return false;
+            g_cursorBitsSeen.fetch_or(v, std::memory_order_relaxed);
             return (v & Offsets().PlayerController.kShowMouseCursorMask) == 0;
         }
 
@@ -2114,6 +2247,48 @@ namespace Subnautica2HeadTracking
                 ? reinterpret_cast<std::uintptr_t>(retAddr) - ue::ModuleBase()
                 : reinterpret_cast<std::uintptr_t>(retAddr);
 
+            // Verify the profile's struct offsets once, as soon as there are
+            // live objects to check them against. Retries while inconclusive:
+            // the early calls run before the pawn exists.
+            if (!g_offsetCheckDone.load(std::memory_order_relaxed)) {
+                const auto selfPtr = reinterpret_cast<std::uintptr_t>(self);
+                const int attempt = g_offsetCheckAttempts.fetch_add(
+                    1, std::memory_order_relaxed) + 1;
+                switch (VerifyProfileOffsets(selfPtr)) {
+                    case OffsetCheck::Pass:
+                        g_offsetCheckDone.store(true, std::memory_order_relaxed);
+                        break;
+                    case OffsetCheck::Mismatch:
+                        if (g_offsetMismatchStreak.fetch_add(
+                                1, std::memory_order_relaxed) + 1
+                            >= kOffsetMismatchStreak) {
+                            g_offsetCheckDone.store(true, std::memory_order_relaxed);
+                            g_trackingEnabled.store(false);
+                            Log::Line("offset-check: profile %s does not fit this "
+                                      "build - tracking disabled, the game runs "
+                                      "vanilla. Please send this log.",
+                                      builds::ActiveProfile().Name);
+                        }
+                        break;
+                    case OffsetCheck::Inconclusive:
+                        g_offsetMismatchStreak.store(0, std::memory_order_relaxed);
+                        // Never concluding is itself a result worth reporting:
+                        // it means the camera manager or the pawn never became
+                        // readable through the profile's offsets.
+                        if (attempt >= kOffsetVerifyBudget) {
+                            g_offsetCheckDone.store(true, std::memory_order_relaxed);
+                            Log::Line("offset-check: still inconclusive after %d calls "
+                                      "- PlayerCameraManager +0x%zx or Pawn +0x%zx "
+                                      "never resolved. Giving up the check; tracking "
+                                      "left ON. Please send this log.",
+                                      kOffsetVerifyBudget,
+                                      Offsets().PlayerController.kPlayerCameraManager,
+                                      Offsets().PlayerController.kPawn);
+                        }
+                        break;
+                }
+            }
+
             const bool inGameplay = InGameplay(reinterpret_cast<std::uintptr_t>(self));
 
             // Run the widget movers every call, not just in gameplay: outside
@@ -2207,14 +2382,28 @@ namespace Subnautica2HeadTracking
                     s_lastHeartbeatTick.store(now, std::memory_order_relaxed);
                     float hy = 0.0f, hp = 0.0f, hr = 0.0f;
                     const bool haveData = g_receiver && g_receiver->GetRotation(hy, hp, hr);
-                    Log::Line("heartbeat hook=%llu  retRVA=0x%08llx  enabled=%s  udpData=%s  raw=(Y=%.2f P=%.2f R=%.2f)  yawMode=%s  injectMode=%d",
+                    const std::uint32_t cursorBits = g_cursorBitsSeen.load(
+                        std::memory_order_relaxed);
+                    const bool cursorBitSeen =
+                        (cursorBits & Offsets().PlayerController.kShowMouseCursorMask) != 0;
+                    // Only worth flagging once the session has had time to pass
+                    // through a menu. At hook #1 nobody has opened anything yet,
+                    // so an ungated note fires on every single startup and stops
+                    // meaning anything by the time it is true.
+                    const bool cursorBitMissing =
+                        !cursorBitSeen && (now - g_bootstrapTickStart) > 300000;
+                    Log::Line("heartbeat hook=%llu  retRVA=0x%08llx  enabled=%s  udpData=%s  raw=(Y=%.2f P=%.2f R=%.2f)  yawMode=%s  injectMode=%d  cursorBits=0x%x%s",
                         static_cast<unsigned long long>(n),
                         static_cast<unsigned long long>(retRva),
                         g_trackingEnabled.load() ? "ON" : "OFF",
                         haveData ? "YES" : "NO",
                         hy, hp, hr,
                         g_worldSpaceYaw.load() ? "world" : "local",
-                        mode);
+                        mode,
+                        cursorBits,
+                        cursorBitMissing ? " (cursor bit never set this session - "
+                                           "suspect a stale bShowMouseCursor offset)"
+                                         : "");
                 }
             }
 

@@ -4,6 +4,21 @@
 
 ### Added
 
+- Support for the 2026-09-01 patch on both stores: Steam build 24915070 and
+  Xbox/Game Pass package 0.12.7034.0. Both are new profiles, so anyone still on
+  an earlier build keeps matching the profile they already had.
+- The mod now checks its build profile against the live game before trusting
+  it, and reports the result as an `offset-check` line in the log. A profile
+  whose field offsets do not fit the running build disables tracking and says
+  so, rather than running on with fields that read the wrong bytes. This closes
+  the one failure shape the build fingerprint cannot catch: the 2026-08-20
+  patch moved a field the fingerprint had no opinion about, and the symptom was
+  tracking quietly never suppressing in menus, with nothing in the log to
+  explain it.
+- `scripts/derive_struct_offsets.py`: reads UPROPERTY byte offsets straight out
+  of the UECodeGen property tables with pefile + capstone, so a patch's struct
+  layout is measured every time instead of carried forward from the previous
+  profile on the assumption that the engine ABI held.
 - `scripts/derive_rvas.py` + `scripts/derive_globals.py`: deterministic
   RVA re-derivation via pefile + capstone (PE signature scan + .pdata
   function table), independent of Ghidra full analysis. Ghidra's analysis

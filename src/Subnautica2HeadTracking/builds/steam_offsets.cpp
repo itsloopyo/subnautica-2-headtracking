@@ -19,6 +19,119 @@ namespace Subnautica2HeadTracking::builds
     extern const BuildProfile kSteamProfile_20260710;
     extern const BuildProfile kSteamProfile_20260714;
     extern const BuildProfile kSteamProfile_20260820;
+    extern const BuildProfile kSteamProfile_20260901;
+
+    // ---- Steam Win64 build released ~2026-09-01 (buildid 24915070, PE TS 0x25ffcc90) ----
+    //
+    // RVAs only. Every struct offset below was re-read from this build's own
+    // UECodeGen property tables (scripts/derive_struct_offsets.py) rather than
+    // carried over from steam-win64-20260820, because the 2026-08-20 patch
+    // showed a content patch can move them: PlayerCameraManager 0x378, Pawn
+    // 0x300, RootComponent 0x1c0, CapsuleComponent 0x350, bShowMouseCursor
+    // 0x564 mask 0x1 - all unchanged, all resolved unambiguously, and
+    // PlayerCameraManager cross-checked against GPV's own
+    // `mov rcx,[rbx+0x378]`. The GPV vtable slot is still 0x830 and the
+    // PlayerCameraManager FOV vfn still 0x800.
+    const BuildProfile kSteamProfile_20260901 = {
+        /* Name        */ "steam-win64-20260901",
+        /* Fingerprint */ { 0x25ffcc90u, 0x0dc9b000u, 0x0d69ff17u },
+        /* Offsets     */ {
+            /* ZRegInfo */ {
+                /* kAUWEPlayerCameraManager        */ 0,
+                /* kUWEPlayerCameraManagerSettings */ 0,
+                /* kAPlayerCameraManager           */ 0,
+                /* kMinimalViewInfo                */ 0,
+                /* kUWECameraPackage               */ 0,
+            },
+            /* ZConstruct */ {
+                /* kAUWEPlayerCameraManager */ 0,
+                /* kAPlayerCameraManager    */ 0,
+                /* kMinimalViewInfo         */ 0,
+                /* kUWECameraPackage        */ 0,
+            },
+            /* UECodeGen */ {
+                /* kConstructUClass_thunk */ 0,
+                /* kConstructUClass       */ 0,
+                /* kConstructUPackage     */ 0,
+            },
+            /* UWEPlayerCameraManager */ {
+                /* kInstanceSize_Bytes */ 0,
+                /* kClassFlags         */ 0,
+                /* kStaticsRva         */ 0,
+            },
+            /* USceneComponentLayout */ {
+                /* kComponentToWorldRotation    */ 0x1f0,
+                /* kComponentToWorldTranslation */ 0x210,
+                /* kComponentToWorldScale       */ 0x230,
+            },
+            // kCapsule is ACharacter::CapsuleComponent and kCapsuleAlias is
+            // AActor::RootComponent, both read off the property table. Nothing
+            // in this group is read at runtime any more (mask compensation
+            // discovers components structurally), so the rest are carried.
+            /* PawnSlots */ {
+                /* kCapsule              */ 0x350,
+                /* kCapsuleAlias         */ 0x1c0,
+                /* kPrimaryMesh          */ 0x340,
+                /* kMeshArrayBegin       */ 0x7d8,
+                /* kMeshArrayStride      */ 0x008,
+                /* kMeshArrayCount       */ 6,
+                /* kCameraMountComponent */ 0x868,
+            },
+            /* PlayerController */ {
+                /* kShowMouseCursorOffset */ 0x564,
+                /* kShowMouseCursorMask   */ 0x1u,
+                /* kPawn                  */ 0x300,
+                /* kPlayerCameraManager   */ 0x378,
+            },
+            // Relocated via scripts/derive_globals.py: allocator sig unique hit
+            // (fn 0x016eb450), the `mov [rip],rax` @ fn+0x18e. FName decoder
+            // pair at 0x0147a220/0x0147a290 agree on the pool and
+            // pool - init_flag == 0x267 holds.
+            /* UObjectGlobals */ {
+                /* kObjObjects       */ 0x0cbdf800ULL,
+                /* kObjObjects_Num   */ 0x14,
+                /* kFUObjectItemSize */ 0x18,
+                /* kChunkNumElems    */ 0x10000,
+                /* kFNamePool        */ 0x0cafb600ULL,
+                /* kFNamePoolBlocks  */ 0x10,
+                /* kClassPrivate     */ 0x10,
+                /* kNamePrivate      */ 0x18,
+                /* kOuterPrivate     */ 0x20,
+            },
+            /* VTables */ {
+                /* kCapsuleComponent      */ 0,
+                /* kSkeletalMeshComponent */ 0,
+                /* kCameraMountComponent  */ 0,
+            },
+            /* MinimalViewInfoLayout */ {
+                /* kFovOffset      */ 0x30,
+                /* kRotationStride */ 0x18,
+            },
+            // Relocated for the 2026-09-01 build (buildid 24915070) via
+            // scripts/derive_rvas.py. GPV anchored on the relocation-free
+            // prologue signature, 1 hit.
+            /* kGetPlayerViewPointRva */ 0x043eb290ULL,
+            /* kKnownCallerRvas */ {{
+                0,
+                // 1: render caller. Containing fn 0x0416f400 is the
+                // FMinimalViewInfo builder - the only `call [reg+0x830]` site
+                // in the image with the builder window around it:
+                // `call [rax+0x800]` (PCM FOV vfn) -> `movss [r14],xmm0`
+                // (FOV store, r14 = base+0x30) -> `lea r8,[rdi+0x18]`
+                // (out_Rotation) -> `call [rax+0x830]` (GPV).
+                0x0416f647ULL,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            }},
+        },
+    };
 
     // ---- Steam Win64 build released ~2026-08-20 (buildid 24418064, PE TS 0xae73a557) ----
     //
