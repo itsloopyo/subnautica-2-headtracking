@@ -24,7 +24,7 @@
 :: if it disagrees with the pushed tag. The value isn't read at install time
 :: (install.ps1 reads the version from pixi.toml inside the ZIP), but the
 :: line must stay present and formatted exactly as below.
-set "MOD_VERSION=0.6.0"
+set "MOD_VERSION=0.6.1"
 
 :: Pinned off for the arg parser below. With delayed expansion on, cmd.exe
 :: strips a `!` out of the expanded text of `set "_ARG=%~1"`, so a real game
