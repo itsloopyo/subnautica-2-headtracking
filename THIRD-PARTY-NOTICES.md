@@ -14,7 +14,7 @@ below, which ships in neither release ZIP.
 | Component | Version | Licence | How it ships |
 |-----------|---------|---------|--------------|
 | MinHook | v1.3.3 (`9fbd087`) | BSD-2-Clause | Compiled into `dxgi.dll` |
-| cameraunlock-core | f441e29427b7422a584ba492dddd7788881804b0 | MIT | Compiled into `dxgi.dll` |
+| cameraunlock-core | bd22895bb30ab7946d780b0af5782755e33e2cba | MIT | Compiled into `dxgi.dll` |
 | OpenTrack | n/a | ISC | Not bundled; UDP protocol interoperability only |
 
 ---
@@ -123,7 +123,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 Git submodule at `cameraunlock-core/`, compiled into `dxgi.dll`. Our own code,
 MIT licensed, reproduced here so the notices are complete.
 
-- Pinned commit: `f441e29427b7422a584ba492dddd7788881804b0`
+- Pinned commit: `bd22895bb30ab7946d780b0af5782755e33e2cba`
 
 ```
 MIT License
