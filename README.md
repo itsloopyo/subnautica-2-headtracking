@@ -8,6 +8,7 @@ An unofficial head tracking mod for Subnautica 2 that moves the view with your h
 
 - **Decoupled look and aim** - your head moves the camera while the mouse or controller keeps controlling aim, so weapons still fire where the reticle points.
 - **6DOF position tracking** - lean and move your head in space, with asymmetric forward/back limits to prevent clipping through the player.
+- **Works with any OpenTrack compatible tracker** - free options available for PC, iOS and Android
 
 ## Requirements
 
