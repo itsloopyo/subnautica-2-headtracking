@@ -4,6 +4,9 @@
 
 ### Added
 
+- Support for the 2026-09-03 patch on both stores: Steam build 25085363 and
+  Xbox/Game Pass package 0.12.8456.0. Both are new profiles, so anyone still on
+  an earlier build keeps matching the profile they already had.
 - Support for the 2026-09-01 patch on both stores: Steam build 24915070 and
   Xbox/Game Pass package 0.12.7034.0. Both are new profiles, so anyone still on
   an earlier build keeps matching the profile they already had.

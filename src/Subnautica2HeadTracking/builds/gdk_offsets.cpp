@@ -26,10 +26,131 @@ namespace Subnautica2HeadTracking::builds
 {
     extern const BuildProfile kGdkProfile_20260820;
     extern const BuildProfile kGdkProfile_20260901;
+    extern const BuildProfile kGdkProfile_20260904;
     extern const BuildProfile kGdkProfile_20260714;
     extern const BuildProfile kGdkProfile_20260710;
     extern const BuildProfile kGdkProfile_20260602;
     extern const BuildProfile kGdkProfile_20260524;
+
+    // ---- Xbox/GDK package 0.12.8456.0 (PE TS 0xf4d8df9b) ----
+    //
+    // Same game patch as steam-win64-20260903, packaged separately. RVAs only.
+    // Every struct offset below was re-read from this build via
+    // scripts/derive_struct_offsets.py against the dump, not carried over, and
+    // every value matches both gdk-wingdk-20260901 and the same-patch Steam
+    // profile: PlayerCameraManager 0x378, Pawn 0x300, RootComponent 0x1c0,
+    // CapsuleComponent 0x350, bShowMouseCursor 0x564 mask 0x1. The control
+    // passed, PlayerCameraManager being the displacement GPV itself
+    // dereferences.
+    //
+    // Do NOT route this build by package version. Get-AppxPackage reported the
+    // previous 0.12.3362.0 for the whole of an update AND for a freshly
+    // reinstalled copy, across three different EXE sizes. The PE fingerprint
+    // was the only field that told the truth at every step.
+    const BuildProfile kGdkProfile_20260904 = {
+        /* Name        */ "gdk-wingdk-20260904",
+        /* Fingerprint */ { 0xf4d8df9bu, 0x0cbb0000u, 0x0c5fd0e9u },
+        /* Offsets     */ {
+            /* ZRegInfo */ {
+                /* kAUWEPlayerCameraManager        */ 0,
+                /* kUWEPlayerCameraManagerSettings */ 0,
+                /* kAPlayerCameraManager           */ 0,
+                /* kMinimalViewInfo                */ 0,
+                /* kUWECameraPackage               */ 0,
+            },
+            /* ZConstruct */ {
+                /* kAUWEPlayerCameraManager */ 0,
+                /* kAPlayerCameraManager    */ 0,
+                /* kMinimalViewInfo         */ 0,
+                /* kUWECameraPackage        */ 0,
+            },
+            /* UECodeGen */ {
+                /* kConstructUClass_thunk */ 0,
+                /* kConstructUClass       */ 0,
+                /* kConstructUPackage     */ 0,
+            },
+            /* UWEPlayerCameraManager */ {
+                /* kInstanceSize_Bytes */ 0,
+                /* kClassFlags         */ 0,
+                /* kStaticsRva         */ 0,
+            },
+            /* USceneComponentLayout */ {
+                /* kComponentToWorldRotation    */ 0x1f0,
+                /* kComponentToWorldTranslation */ 0x210,
+                /* kComponentToWorldScale       */ 0x230,
+            },
+            // kCapsule is ACharacter::CapsuleComponent and kCapsuleAlias is
+            // AActor::RootComponent, both read off the property table. Nothing
+            // in this group is read at runtime any more (mask compensation
+            // discovers components structurally), so the rest are carried.
+            /* PawnSlots */ {
+                /* kCapsule              */ 0x350,
+                /* kCapsuleAlias         */ 0x1c0,
+                /* kPrimaryMesh          */ 0x340,
+                /* kMeshArrayBegin       */ 0x7d8,
+                /* kMeshArrayStride      */ 0x008,
+                /* kMeshArrayCount       */ 6,
+                /* kCameraMountComponent */ 0x868,
+            },
+            /* PlayerController */ {
+                /* kShowMouseCursorOffset */ 0x564,
+                /* kShowMouseCursorMask   */ 0x1u,
+                /* kPawn                  */ 0x300,
+                /* kPlayerCameraManager   */ 0x378,
+            },
+            // Relocated via scripts/derive_globals.py against the dump:
+            // allocator sig unique hit (fn 0x01502b20), the `mov [rip],rax` @
+            // fn+0x18e. FName decoder pair at 0x0128f5a0/0x0128f610 agree on
+            // the pool and pool - init_flag == 0x267 holds. Both globals land
+            // at the same addresses as gdk-wingdk-20260901 - this patch grew
+            // .text without shifting .data, and each value is read out of the
+            // rip-relative displacement in this build's own code rather than
+            // carried across, so the repeat is a result, not an assumption.
+            /* UObjectGlobals */ {
+                /* kObjObjects       */ 0x0bbc4d00ULL,
+                /* kObjObjects_Num   */ 0x14,
+                /* kFUObjectItemSize */ 0x18,
+                /* kChunkNumElems    */ 0x10000,
+                /* kFNamePool        */ 0x0bae0a80ULL,
+                /* kFNamePoolBlocks  */ 0x10,
+                /* kClassPrivate     */ 0x10,
+                /* kNamePrivate      */ 0x18,
+                /* kOuterPrivate     */ 0x20,
+            },
+            /* VTables */ {
+                /* kCapsuleComponent      */ 0,
+                /* kSkeletalMeshComponent */ 0,
+                /* kCameraMountComponent  */ 0,
+            },
+            /* MinimalViewInfoLayout */ {
+                /* kFovOffset      */ 0x30,
+                /* kRotationStride */ 0x18,
+            },
+            // Relocated for GDK package 0.12.8456.0 via scripts/derive_rvas.py
+            // against a scripts/dump-running-exe.ps1 -RebaseTo 0 dump. GPV
+            // anchored on the relocation-free prologue signature, 1 hit.
+            /* kGetPlayerViewPointRva */ 0x0417fb00ULL,
+            /* kKnownCallerRvas */ {{
+                0,
+                // 1: render caller. Containing fn 0x03f03b40 is the
+                // FMinimalViewInfo builder - the only `call [reg+0x830]` site
+                // in the image with the builder window around it:
+                // `call [rax+0x800]` (PCM FOV vfn) -> `movss [r14],xmm0`
+                // (FOV store, r14 = base+0x30) -> `lea r8,[rdi+0x18]`
+                // (out_Rotation) -> `call [rax+0x830]` (GPV).
+                0x03f03d87ULL,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            }},
+        },
+    };
 
     // ---- Xbox/GDK package 0.12.7034.0 (PE TS 0x7d471cdc) ----
     //
