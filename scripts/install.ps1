@@ -92,13 +92,19 @@ if ($GivenPath) {
             }
         }
     }
-    # Xbox/Game Pass: each configured xbox_paths entry that holds the WinGDK exe.
-    if ($cfg.ContainsKey('XboxPaths') -and $cfg.XboxPaths) {
-        foreach ($xboxRoot in $cfg.XboxPaths) {
-            if (Test-Path (Join-Path $xboxRoot $xboxExeRelpath)) {
-                $installs += New-Install 'Xbox/Game Pass' $xboxRoot $xboxExeRelpath
-            }
-        }
+    # Xbox/Game Pass: the Xbox app's own install roots, read off disk and
+    # scanned for the WinGDK exe. Deliberately not a configured path - games.json
+    # used to carry one per game, every one of them named C:, and the Xbox app
+    # asks each user which drive to install to. Anyone who answered anything else
+    # had their copy missed, silently, because a Game Pass install produces no
+    # hit from Steam or the env var either.
+    $xboxIdentity = if ($cfg.ContainsKey('XboxIdentityName') -and $cfg.XboxIdentityName) {
+        $cfg.XboxIdentityName
+    } else {
+        ''
+    }
+    foreach ($xboxRoot in (Find-XboxGamePaths -Executable $xboxExeRelpath -IdentityName $xboxIdentity)) {
+        $installs += New-Install 'Xbox/Game Pass' $xboxRoot $xboxExeRelpath
     }
 }
 

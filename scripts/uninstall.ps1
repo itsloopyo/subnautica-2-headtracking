@@ -75,12 +75,15 @@ if ($GivenPath) {
             }
         }
     }
-    if ($cfg.ContainsKey('XboxPaths') -and $cfg.XboxPaths) {
-        foreach ($xboxRoot in $cfg.XboxPaths) {
-            if (Test-Path (Join-Path $xboxRoot $xboxExeRelpath)) {
-                $installs += New-Install 'Xbox/Game Pass' $xboxRoot $xboxExeRelpath
-            }
-        }
+    # The Xbox app's own install roots, read off disk. See install.ps1 for why
+    # this is a scan and not a configured path.
+    $xboxIdentity = if ($cfg.ContainsKey('XboxIdentityName') -and $cfg.XboxIdentityName) {
+        $cfg.XboxIdentityName
+    } else {
+        ''
+    }
+    foreach ($xboxRoot in (Find-XboxGamePaths -Executable $xboxExeRelpath -IdentityName $xboxIdentity)) {
+        $installs += New-Install 'Xbox/Game Pass' $xboxRoot $xboxExeRelpath
     }
 }
 

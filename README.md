@@ -18,6 +18,13 @@ An unofficial head tracking mod for Subnautica 2 that moves the view with your h
 
 ## Installation
 
+### Lopari
+
+Download [Lopari](https://lopari.app), choose **Subnautica 2**, and click
+**Play with head tracking**.
+
+### Standalone Installer
+
 1. Download `Subnautica2HeadTracking-vX.Y.Z-installer.zip` from the [Releases page](https://github.com/itsloopyo/subnautica-2-headtracking/releases).
 2. Extract it anywhere.
 3. Double-click `install.cmd`.
