@@ -9,6 +9,7 @@ platforms = ["win-64"]
 cmake = ">=3.28"
 
 [tasks]
+update-submodule = "git submodule update --remote cameraunlock-core && powershell -NoProfile -ExecutionPolicy Bypass -File cameraunlock-core/scripts/update-submodule.ps1"
 sync = "git submodule update --remote cameraunlock-core"
 
 # Configure CMake (x64, MSVC, UE5/WinGDK target). No -G: let CMake auto-detect
