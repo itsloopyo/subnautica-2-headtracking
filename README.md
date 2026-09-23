@@ -12,7 +12,7 @@ An unofficial head tracking mod for Subnautica 2 that moves the view with your h
 
 ## Requirements
 
-- Subnautica 2, either the [Steam build](https://store.steampowered.com/app/1962700/Subnautica_2/) or the Game Pass / Xbox app build. Both store versions are supported; the installer auto-detects whichever (or both) you have.
+- Subnautica 2, either the [Steam build](https://store.steampowered.com/app/1962700/Subnautica_2/) or the Xbox Game Pass build. Both store versions are supported; the installer auto-detects whichever (or both) you have.
 - An [OpenTrack](https://github.com/opentrack/opentrack)-compatible head tracker (VR headset, webcam, or phone app).
 - Windows 10 or 11, 64-bit.
 
@@ -32,7 +32,7 @@ Download [Lopari](https://lopari.app), choose **Subnautica 2**, and click
 5. Launch the game.
 
 `install.cmd` finds every installed copy of Subnautica 2 on your machine
-and deploys to all of them. If you have both Steam and Game Pass
+and deploys to all of them. If you have both Steam and Xbox Game Pass
 installed, both are mod-enabled in one pass.
 
 If the installer cannot find your game, point it at the install root
@@ -40,12 +40,12 @@ directly with a positional argument:
 
 ```powershell
 install.cmd "D:\Games\Subnautica 2"               :: Steam-layout root
-install.cmd "C:\XboxGames\Subnautica 2\Content"   :: Game Pass root
+install.cmd "C:\XboxGames\Subnautica 2\Content"   :: Xbox Game Pass root
 ```
 
 or set the `SUBNAUTICA_2_PATH` environment variable to your install root.
 
-### Game Pass / Xbox App Notes
+### Xbox Game Pass Notes
 
 The Xbox app install is more locked down than the Steam install. Use the
 game's `Content` folder as the root, normally:
@@ -77,14 +77,14 @@ binaries folder for whichever build you have:
 | Store     | Target folder |
 |-----------|---------------|
 | Steam     | `<steam>\steamapps\common\Subnautica2\Subnautica2\Binaries\Win64\` |
-| Game Pass | `C:\XboxGames\Subnautica 2\Content\Subnautica2\Binaries\WinGDK\`   |
+| Xbox Game Pass | `C:\XboxGames\Subnautica 2\Content\Subnautica2\Binaries\WinGDK\`   |
 
 You need three files in that folder:
 
 1. `dxgi.dll` - the mod itself (from the release ZIP's `plugins/`). This
    is a DXGI proxy: every DXGI call the game makes flows through us,
    which is how we hook the camera path. The same `dxgi.dll` works for
-   both Steam and Game Pass; the proxy fingerprints the running exe and
+   both Steam and Xbox Game Pass; the proxy fingerprints the running exe and
    selects the right RVA profile at load time.
 2. `dxgi_orig.dll` - **a copy of your own `C:\Windows\System32\dxgi.dll`**.
    The mod's exports forward here, so the game still reaches the real
@@ -92,7 +92,7 @@ You need three files in that folder:
    ```cmd
    :: Steam
    copy C:\Windows\System32\dxgi.dll "<steam>\steamapps\common\Subnautica2\Subnautica2\Binaries\Win64\dxgi_orig.dll"
-   :: Game Pass
+   :: Xbox Game Pass
    copy C:\Windows\System32\dxgi.dll "C:\XboxGames\Subnautica 2\Content\Subnautica2\Binaries\WinGDK\dxgi_orig.dll"
    ```
 3. `HeadTracking.ini` - mod configuration.
@@ -202,7 +202,7 @@ CENTER in Headcam, or the equivalent in whatever you run.
 
 Settings live in `HeadTracking.ini`, next to the game executable
 (`Subnautica2\Binaries\Win64\` for Steam, `Subnautica2\Binaries\WinGDK\`
-for Game Pass). Edit it and restart the game to apply changes. If both
+for Xbox Game Pass). Edit it and restart the game to apply changes. If both
 builds are installed, each has its own copy of the file.
 
 On the Xbox app build, Windows may block normal saves under the game
@@ -265,7 +265,7 @@ ToggleYawMode = 0x22
 
 **Mod not loading**
 
-- Confirm `dxgi.dll`, `dxgi_orig.dll`, and `HeadTracking.ini` are all in the binaries folder for your build - `Subnautica2\Binaries\Win64\` for Steam, `Subnautica2\Binaries\WinGDK\` for Game Pass. Missing `dxgi_orig.dll` is the most common cause - the proxy forwards every DXGI export there, so without it the game crashes on launch.
+- Confirm `dxgi.dll`, `dxgi_orig.dll`, and `HeadTracking.ini` are all in the binaries folder for your build - `Subnautica2\Binaries\Win64\` for Steam, `Subnautica2\Binaries\WinGDK\` for Xbox Game Pass. Missing `dxgi_orig.dll` is the most common cause - the proxy forwards every DXGI export there, so without it the game crashes on launch.
 - Windows may block the downloaded DLL: right-click `dxgi.dll`, Properties, then Unblock.
 - Check the mod log next to the DLL for a `build-check: PASS - matched profile ...` line.
 
@@ -296,7 +296,7 @@ preserved.
 
 Run `uninstall.cmd`. This removes `dxgi.dll`, `dxgi_orig.dll`, and
 `HeadTracking.ini` from the binaries folder of every detected install
-(Steam and / or Game Pass). If you had a pre-existing `dxgi.dll` (e.g.
+(Steam and / or Xbox Game Pass). If you had a pre-existing `dxgi.dll` (e.g.
 ReShade) when you installed the mod, the original is restored from its
 `.backup` copy. Pass `/force` to discard the backup instead.
 
