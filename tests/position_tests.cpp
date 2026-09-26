@@ -1,18 +1,16 @@
 // Behaviour lock for the 6DOF lean boundary: which way the view moves for a
-// physical lean, how much of the asymmetric budget each direction gets, and
-// whether the shipped HeadTracking.ini still agrees with the code defaults.
+// physical lean, and how much of the asymmetric budget each direction gets.
 //
 // The mod used to carry InvertZ=true with LimitZ and LimitZBack swapped in the
 // INI, the code defaults and the launcher-manifest seed alike. The two errors
 // cancelled, so it behaved correctly, but the INI's Z keys named the opposite
 // direction to every other mod's and any half-edit of that triple - a user
 // clearing InvertZ, a sync that took one file and not the others - reversed the
-// budgets while the direction still looked right.
+// budgets while the direction still looked right. Both mirrors now live in
+// position_boundary.h, past the clamp, and no setting inverts an axis.
 
 #include <cmath>
 #include <cstdio>
-#include <fstream>
-#include <string>
 
 #include "position_boundary.h"
 
@@ -53,26 +51,21 @@ void ForwardLeanMovesViewForward() {
     CheckNear(heave, 0.1 * pd::kMetersToUE, "up maps to +heave, in centimetres");
 }
 
+// The settings BootstrapThread hands the processor at the default limits:
+// core's defaults, whose sensitivities are 1 and whose inversions are off.
 cameraunlock::PositionSettings DefaultSettings() {
     cameraunlock::PositionSettings s;
-    s.sensitivity_x = pd::kSensitivityX;
-    s.sensitivity_y = pd::kSensitivityY;
-    s.sensitivity_z = pd::kSensitivityZ;
-    s.invert_x = pd::kInvertX;
-    s.invert_y = pd::kInvertY;
-    s.invert_z = pd::kInvertZ;
     s.limit_x = pd::kLimitX;
-    pd::ApplyVerticalLimit(s, pd::kLimitY);
+    s.limit_y = pd::kLimitY;
+    s.limit_y_down = pd::kLimitYDown;
     s.limit_z = pd::kLimitZ;
     s.limit_z_back = pd::kLimitZBack;
     return s;
 }
 
-cameraunlock::math::Vec3 Saturated(float rawX, float rawY, float rawZ,
-                                   float limitY = pd::kLimitY) {
+cameraunlock::math::Vec3 Saturated(const cameraunlock::PositionSettings& settings,
+                                   float rawX, float rawY, float rawZ) {
     cameraunlock::PositionProcessor processor;
-    cameraunlock::PositionSettings settings = DefaultSettings();
-    pd::ApplyVerticalLimit(settings, limitY);
     processor.SetSettings(settings);
     const cameraunlock::PositionData raw(rawX, rawY, rawZ);
     // Two ticks so the smoothing state has settled on the clamped value.
@@ -82,7 +75,7 @@ cameraunlock::math::Vec3 Saturated(float rawX, float rawY, float rawZ,
 
 double SaturatedSurge(float rawZ) {
     double surge = 0.0, sway = 0.0, heave = 0.0;
-    pd::TrackerOffsetToUE(Saturated(0.0f, 0.0f, rawZ), surge, sway, heave);
+    pd::TrackerOffsetToUE(Saturated(DefaultSettings(), 0.0f, 0.0f, rawZ), surge, sway, heave);
     return surge;
 }
 
@@ -95,76 +88,16 @@ void LeanBudgetsAreNotReversed() {
               "backward lean gets the LimitZBack budget");
 }
 
-void VerticalBudgetIsSymmetric() {
-    // Raised well clear of limit_y_down's own 0.20 default, which is what made
-    // the missing mirror invisible: at the shipped LimitY the two coincide.
-    const float raised = 0.35f;
-    CheckNear(static_cast<double>(Saturated(0.0f, 1.0f, 0.0f, raised).y), raised,
-              "a raised LimitY widens the upward budget");
-    CheckNear(static_cast<double>(Saturated(0.0f, -1.0f, 0.0f, raised).y), -raised,
-              "a raised LimitY widens the downward budget by the same amount");
-}
-
-// Minimal reader for the shipped file: last "key = value" wins, sections are
-// tracked so [Position] keys are not confused with same-named ones elsewhere.
-std::string ReadIniValue(const char* section, const char* key) {
-    std::ifstream file(SN2HT_SHIPPED_INI);
-    if (!file) {
-        std::printf("FAIL: cannot open %s\n", SN2HT_SHIPPED_INI);
-        ++g_failures;
-        return std::string();
-    }
-    std::string line, current, found;
-    while (std::getline(file, line)) {
-        const std::size_t start = line.find_first_not_of(" \t\r");
-        if (start == std::string::npos || line[start] == ';' || line[start] == '#') continue;
-        const std::size_t end = line.find_last_not_of(" \t\r");
-        const std::string trimmed = line.substr(start, end - start + 1);
-        if (trimmed.front() == '[') {
-            current = trimmed.substr(1, trimmed.find(']') - 1);
-            continue;
-        }
-        const std::size_t eq = trimmed.find('=');
-        if (eq == std::string::npos || current != section) continue;
-        std::string k = trimmed.substr(0, eq);
-        std::string v = trimmed.substr(eq + 1);
-        const std::size_t ke = k.find_last_not_of(" \t");
-        k = k.substr(0, ke + 1);
-        const std::size_t vs = v.find_first_not_of(" \t");
-        if (vs != std::string::npos) v = v.substr(vs); else v.clear();
-        if (k == key) found = v;
-    }
-    return found;
-}
-
-void CheckIniBool(const char* key, bool expected) {
-    const std::string value = ReadIniValue("Position", key);
-    const bool actual = (value == "true" || value == "1");
-    if (actual == expected && !value.empty()) return;
-    std::printf("FAIL: shipped INI [Position] %s is \"%s\", code default is %s\n",
-                key, value.c_str(), expected ? "true" : "false");
-    ++g_failures;
-}
-
-void CheckIniFloat(const char* key, float expected) {
-    const std::string value = ReadIniValue("Position", key);
-    if (!value.empty() && std::fabs(std::stod(value) - expected) <= 1e-6) return;
-    std::printf("FAIL: shipped INI [Position] %s is \"%s\", code default is %.3f\n",
-                key, value.c_str(), expected);
-    ++g_failures;
-}
-
-void ShippedIniMatchesCodeDefaults() {
-    CheckIniBool("InvertX", pd::kInvertX);
-    CheckIniBool("InvertY", pd::kInvertY);
-    CheckIniBool("InvertZ", pd::kInvertZ);
-    CheckIniFloat("SensitivityX", pd::kSensitivityX);
-    CheckIniFloat("SensitivityY", pd::kSensitivityY);
-    CheckIniFloat("SensitivityZ", pd::kSensitivityZ);
-    CheckIniFloat("LimitX", pd::kLimitX);
-    CheckIniFloat("LimitY", pd::kLimitY);
-    CheckIniFloat("LimitZ", pd::kLimitZ);
-    CheckIniFloat("LimitZBack", pd::kLimitZBack);
+void EachVerticalLimitBoundsItsOwnDirection() {
+    // Apart and clear of core's 0.20m default for both, so a bound taken from
+    // the wrong field shows.
+    cameraunlock::PositionSettings settings = DefaultSettings();
+    settings.limit_y = 0.35f;
+    settings.limit_y_down = 0.05f;
+    CheckNear(static_cast<double>(Saturated(settings, 0.0f, 1.0f, 0.0f).y), 0.35,
+              "PositionLimitY bounds raising the head");
+    CheckNear(static_cast<double>(Saturated(settings, 0.0f, -1.0f, 0.0f).y), -0.05,
+              "PositionLimitYDown bounds lowering it");
 }
 
 } // namespace
@@ -172,8 +105,7 @@ void ShippedIniMatchesCodeDefaults() {
 int main() {
     ForwardLeanMovesViewForward();
     LeanBudgetsAreNotReversed();
-    VerticalBudgetIsSymmetric();
-    ShippedIniMatchesCodeDefaults();
+    EachVerticalLimitBoundsItsOwnDirection();
 
     if (g_failures != 0) {
         std::printf("%d check(s) failed\n", g_failures);

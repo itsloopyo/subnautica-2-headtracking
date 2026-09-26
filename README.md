@@ -79,7 +79,7 @@ binaries folder for whichever build you have:
 | Steam     | `<steam>\steamapps\common\Subnautica2\Subnautica2\Binaries\Win64\` |
 | Xbox Game Pass | `C:\XboxGames\Subnautica 2\Content\Subnautica2\Binaries\WinGDK\`   |
 
-You need three files in that folder:
+You need two files in that folder:
 
 1. `dxgi.dll` - the mod itself (from the release ZIP's `plugins/`). This
    is a DXGI proxy: every DXGI call the game makes flows through us,
@@ -95,7 +95,9 @@ You need three files in that folder:
    :: Xbox Game Pass
    copy C:\Windows\System32\dxgi.dll "C:\XboxGames\Subnautica 2\Content\Subnautica2\Binaries\WinGDK\dxgi_orig.dll"
    ```
-3. `HeadTracking.ini` - mod configuration.
+
+The mod creates its settings file, `CameraUnlock.ini`, in the same folder the
+first time the game starts with it (see [Configuration](#configuration)).
 
 The Nexus ZIP contains both `Binaries\Win64\` and `Binaries\WinGDK\`
 trees in one bundle. Extract it at the package root and the files land
@@ -179,7 +181,7 @@ view sits off to one side, centre it in the tracker.
 
 ## Controls
 
-Two equivalent binding sets - use whichever your keyboard has:
+Two equivalent binding sets by default - use whichever your keyboard has:
 
 | Action                          | Nav-cluster | Chord          |
 |---------------------------------|-------------|----------------|
@@ -198,74 +200,155 @@ CENTER in Headcam, or the equivalent in whatever you run.
 3. Rotational tracking disabled, positional tracking enabled
 4. Back to normal
 
+The tracking mode and the yaw mode are saved to `CameraUnlock.ini` when you
+change them, so the game starts in the mode you left it in. Turning tracking on
+or off is not saved: the game starts with head tracking on or off as
+`EnableOnStartup` says. Each hotkey is a list of keys in the `[Hotkeys]`
+section of `CameraUnlock.ini`, the chords included, and you can change any of
+them there.
+
 ## Configuration
 
-Settings live in `HeadTracking.ini`, next to the game executable
-(`Subnautica2\Binaries\Win64\` for Steam, `Subnautica2\Binaries\WinGDK\`
-for Xbox Game Pass). Edit it and restart the game to apply changes. If both
-builds are installed, each has its own copy of the file.
+<!-- cameraunlock:config -->
+The mod reads its settings from `CameraUnlock.ini` in the game folder, at one of these paths depending on the store the game came from:
+
+- `Subnautica2\Binaries\Win64\CameraUnlock.ini`
+- `Subnautica2\Binaries\WinGDK\CameraUnlock.ini`
+
+It creates the file when it starts and finds none. Edit it with any text editor.
+
+A setting set to `default` takes its value from `Defaults.ini`, which every head tracking mod that keeps its settings in `CameraUnlock.ini` reads. Head tracking mods that keep their settings in another file do not read it, and neither do earlier versions of this mod. Writing a value in place of `default` changes that setting for this game only. When the mod saves a setting that a hotkey changed in game, it writes the new value in place of `default`, so that setting no longer follows `Defaults.ini` in this game until you set it to `default` again.
+
+`Defaults.ini` is `%AppData%\CameraUnlock\Defaults.ini` on Windows; `$XDG_CONFIG_HOME/CameraUnlock/Defaults.ini` on Linux, or `~/.config/CameraUnlock/Defaults.ini` where `XDG_CONFIG_HOME` is not set, under Wine and Proton too; and `~/Library/Application Support/CameraUnlock/Defaults.ini` on macOS. The mod's log, where it writes one, names the file it read.
+
+When the mod starts and finds no `Defaults.ini`, it creates one holding the built-in values, unless Windows runs the game as a packaged app. The mod never changes `Defaults.ini` after that. Edit it with any text editor.
+
+Earlier versions of the mod kept these settings in `HeadTracking.ini`, in the same folder. The first time this version starts and finds no `CameraUnlock.ini`, it reads your settings from `HeadTracking.ini` and writes them into `CameraUnlock.ini`. It never changes `HeadTracking.ini`, and does not read it again while `CameraUnlock.ini` exists.
+
+A setting that the defaults below set to `default` is written as `default` when the value imported for it equals its default at that start, which is the value `Defaults.ini` gives it, or the built-in value where `Defaults.ini` gives none. It then follows `Defaults.ini`. Every other setting is written with the value imported for it. `RotationEnabled` and `PositionEnabled` are one setting here, the tracking mode, so both are written as `default` or neither is.
+
+Comments, and keys the mod never read, are not carried over. Nor are these, where your old file had them:
+
+- Reticle settings, and a key that toggled the reticle.
+- A sensitivity, scale, deadzone, response curve or axis inversion you changed from its default. Set these in your tracker instead.
+- The setting for a feature that earlier versions shipped switched off while it was untested. It now follows the mod's default.
+
+An older version of the mod reads `HeadTracking.ini` and never reads `CameraUnlock.ini`, so a setting you change after updating is not in `HeadTracking.ini`.
+
+Deleting only `CameraUnlock.ini` makes the next start read `HeadTracking.ini` again. To go back to the defaults, replace everything in `CameraUnlock.ini` with the defaults below. Every setting they set to `default` then follows `Defaults.ini`.
+
+The built-in value of each setting set to `default` below:
+
+- `UdpPort=4242`
+- `EnableOnStartup=true`
+- `WorldSpaceYaw=true`
+- `RotationEnabled=true`
+- `LocalSmoothing=0.0`
+- `RemoteSmoothing=0.15`
+- `PositionEnabled=true`
+- `PositionLimitX=0.3`
+- `PositionLimitY=0.2`
+- `PositionLimitYDown=0.2`
+- `PositionLimitZ=0.4`
+- `PositionLimitZBack=0.1`
+- `ToggleKey=End, Ctrl+Shift+Y`
+- `CycleTrackingModeKey=PageUp, Ctrl+Shift+G`
+- `YawModeKey=PageDown, Ctrl+Shift+H`
+
+With every setting at its default, the file reads:
+
+```ini
+; Subnautica 2 head tracking settings.
+; Comments start with ; and go on their own line. Text after a value is part of the value.
+; Hotkeys are key names such as End, PageUp or Ctrl+Shift+Y. Separate several with commas; leave empty for none.
+; A setting set to default takes its value from Defaults.ini, which every head tracking mod
+; that keeps its settings in CameraUnlock.ini reads: %AppData%\CameraUnlock\Defaults.ini on
+; Windows, $XDG_CONFIG_HOME/CameraUnlock/Defaults.ini (normally ~/.config/CameraUnlock) on
+; Linux, under Wine and Proton too, and ~/Library/Application Support/CameraUnlock/Defaults.ini
+; on macOS. The log names the file it read. Write a value instead of default to change that
+; setting for this game only.
+
+[CameraUnlock]
+; Written by the mod. Leave this section in place.
+ConfigFormat=1
+
+[Network]
+; UDP port the mod receives tracker data on (OpenTrack protocol).
+UdpPort=default
+
+[General]
+; true: head tracking is on when the game starts. ToggleKey turns it on and off.
+EnableOnStartup=default
+; true: yaw turns around the world's up axis. false: around the camera's own up axis.
+WorldSpaceYaw=default
+; true: turning your head turns the view.
+; Tracking mode at startup, with PositionEnabled. The mode hotkey changes both.
+RotationEnabled=default
+
+[Smoothing]
+; Smoothing when the tracker runs on this PC. 0 is the least, 1 the most.
+LocalSmoothing=default
+; Smoothing when the tracker is another device on the network, such as a phone.
+; 0 is the least, 1 the most.
+RemoteSmoothing=default
+
+[Position]
+; true: moving your head moves the view.
+; Tracking mode at startup, with RotationEnabled. The mode hotkey changes both.
+PositionEnabled=default
+; How far, in metres, leaning left or right can move the view.
+PositionLimitX=default
+; How far, in metres, raising your head can move the view.
+PositionLimitY=default
+; How far, in metres, lowering your head can move the view.
+PositionLimitYDown=default
+; How far, in metres, leaning forward can move the view.
+PositionLimitZ=default
+; How far, in metres, leaning back can move the view.
+PositionLimitZBack=default
+
+[Hotkeys]
+; Turns head tracking on and off.
+ToggleKey=default
+; Changes the tracking mode: rotation and position, rotation only, position only.
+CycleTrackingModeKey=default
+; Switches yaw between the world's up axis and the camera's own (WorldSpaceYaw).
+YawModeKey=default
+
+[Tooltip]
+; true: the prompt naming what you point at moves with the reticle, so it stays where
+; you aim. false: it stays at the centre of the view.
+FollowReticle=true
+; Scales how far the reticle and that prompt move to follow your aim. Leave it at 1.0
+; unless they overshoot your aim at your resolution (lower it) or fall short (raise it).
+FollowScale=1.0
+
+[Debug]
+; true: turn off the correction that keeps the mask fixed on screen as your head
+; turns; head tracking stays on. For a crash or conflict with another program that
+; hooks the game's rendering, such as an overlay or ReShade.
+DisableMaskComp=false
+```
+<!-- /cameraunlock:config -->
+
+Changes take effect the next time the game starts. If both builds are
+installed, each has its own `CameraUnlock.ini`.
 
 On the Xbox app build, Windows may block normal saves under the game
 folder. Open Notepad as administrator, then open:
 
 ```cmd
-C:\XboxGames\Subnautica 2\Content\Subnautica2\Binaries\WinGDK\HeadTracking.ini
+C:\XboxGames\Subnautica 2\Content\Subnautica2\Binaries\WinGDK\CameraUnlock.ini
 ```
 
 If you installed the game to another drive or folder, use that install's
-`Content\Subnautica2\Binaries\WinGDK\HeadTracking.ini` path instead.
-
-```ini
-[Network]
-Port = 4242            ; OpenTrack UDP port
-
-[Tracking]
-; start with tracking active
-EnableOnStartup = true
-YawSensitivity = 1.0   ; multiplier for left/right look
-PitchSensitivity = 1.0 ; multiplier for up/down look
-RollSensitivity = 1.0  ; multiplier for head tilt
-InvertYaw = false
-InvertPitch = false
-InvertRoll = false
-LocalSmoothing = 0.0   ; smoothing for a tracker on this machine (loopback); 0 = none, 1 = heavy
-RemoteSmoothing = 0.15 ; smoothing for a remote device on the network; 0 = none, 1 = heavy
-; move the game's reticle to the aim point
-ShowReticle = true
-; true = horizon-locked yaw (default), false = camera-local
-WorldSpaceYaw = true
-
-[Position]
-; 6DOF head position tracking
-Enabled = true
-SensitivityX = 1.0
-SensitivityY = 1.0
-SensitivityZ = 1.0
-; sideways lean direction
-InvertX = false
-; vertical move direction
-InvertY = false
-; forward/back lean direction
-InvertZ = false
-LimitX = 0.30          ; max sideways lean in meters
-LimitY = 0.20          ; max vertical move in meters
-; Asymmetric on purpose: leaning in gets the generous 0.40, leaning back the
-; restricted 0.10 so the camera cannot pull through the player model.
-LimitZ = 0.40          ; forward lean limit in meters
-LimitZBack = 0.10      ; backward lean limit in meters
-
-[Hotkeys]
-; Toggle tracking (End) and cycle tracking mode (Page Up) are fixed, each also
-; reachable with a Ctrl+Shift chord. Only the yaw-mode toggle is rebindable
-; here. VK code: PageDown = 0x22.
-ToggleYawMode = 0x22
-```
+`Content\Subnautica2\Binaries\WinGDK\CameraUnlock.ini` path instead.
 
 ## Troubleshooting
 
 **Mod not loading**
 
-- Confirm `dxgi.dll`, `dxgi_orig.dll`, and `HeadTracking.ini` are all in the binaries folder for your build - `Subnautica2\Binaries\Win64\` for Steam, `Subnautica2\Binaries\WinGDK\` for Xbox Game Pass. Missing `dxgi_orig.dll` is the most common cause - the proxy forwards every DXGI export there, so without it the game crashes on launch.
+- Confirm `dxgi.dll` and `dxgi_orig.dll` are both in the binaries folder for your build - `Subnautica2\Binaries\Win64\` for Steam, `Subnautica2\Binaries\WinGDK\` for Xbox Game Pass. Missing `dxgi_orig.dll` is the most common cause - the proxy forwards every DXGI export there, so without it the game crashes on launch.
 - Windows may block the downloaded DLL: right-click `dxgi.dll`, Properties, then Unblock.
 - Check the mod log next to the DLL for a `build-check: PASS - matched profile ...` line.
 
@@ -276,12 +359,12 @@ ToggleYawMode = 0x22
 
 **Jittery / unstable tracking**
 
-- Raise the smoothing key that matches your tracker: `LocalSmoothing` in `[Tracking]` for a tracker on this machine, `RemoteSmoothing` for a device on the network. 0.3-0.5 is a good starting point.
+- Raise the smoothing key that matches your tracker: `LocalSmoothing` in `[Smoothing]` for a tracker on this machine, `RemoteSmoothing` for a device on the network. 0.3-0.5 is a good starting point.
 - On a wireless or phone tracker, expect more jitter; `RemoteSmoothing` defaults to 0.15 and can go higher.
 
 **Wrong rotation axis**
 
-- If a look axis goes the wrong way, set the matching `Invert` flag (`InvertYaw` / `InvertPitch` / `InvertRoll`) to `true`.
+- The mod applies the pose as your tracker sends it and has no axis inversion setting. If a look axis goes the wrong way, invert it in your tracker app.
 
 **Yaw feels wrong when looking up or down at extreme angles**
 
@@ -289,14 +372,16 @@ ToggleYawMode = 0x22
 
 ## Updating
 
-Download the new release and run `install.cmd` again. Your config is
-preserved.
+Download the new release and run `install.cmd` again. The installer
+never writes `CameraUnlock.ini` or `HeadTracking.ini`, so your settings stay
+as they are.
 
 ## Uninstalling
 
-Run `uninstall.cmd`. This removes `dxgi.dll`, `dxgi_orig.dll`, and
-`HeadTracking.ini` from the binaries folder of every detected install
-(Steam and / or Xbox Game Pass). If you had a pre-existing `dxgi.dll` (e.g.
+Run `uninstall.cmd`. This removes `dxgi.dll` and `dxgi_orig.dll` from the
+binaries folder of every detected install (Steam and / or Xbox Game Pass),
+and leaves `CameraUnlock.ini` and `HeadTracking.ini`, your settings, where
+they are. If you had a pre-existing `dxgi.dll` (e.g.
 ReShade) when you installed the mod, the original is restored from its
 `.backup` copy. Pass `/force` to discard the backup instead.
 

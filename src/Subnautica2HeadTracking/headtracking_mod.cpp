@@ -8,8 +8,10 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -20,12 +22,13 @@
 #include "builds/build_registry.h"
 #include "aim_projection.h"
 #include "position_boundary.h"
-#include "legacy_config/legacy_config.h"
+#include "config.h"
 
 #include "cameraunlock/diagnostics/crash_handler.h"
 #include "cameraunlock/protocol/udp_receiver.h"
-#include "cameraunlock/input/chord_hotkeys.h"
 #include "cameraunlock/input/hotkey_poller.h"
+#include "cameraunlock/input/key_binding_registration.h"
+#include "cameraunlock/input/key_bindings.h"
 #include "cameraunlock/hooks/hook_manager.h"
 #include "cameraunlock/processing/pose_interpolator.h"
 #include "cameraunlock/processing/position_interpolator.h"
@@ -35,6 +38,7 @@
 #include "cameraunlock/math/quat4.h"
 #include "cameraunlock/math/smoothing_utils.h"
 #include "cameraunlock/time/frame_clock.h"
+#include "cameraunlock/tracking/tracking_mode.h"
 #include "cameraunlock/unreal/ue_math.h"
 #include "cameraunlock/unreal/ue_runtime.h"
 
@@ -92,16 +96,14 @@ namespace Subnautica2HeadTracking
         // the first 30s post-boot, where GPU crashes on level-load happen.
         std::uint64_t g_bootstrapTickStart = 0;
 
-        // Set true via [Debug] DisableMaskComp=true in HeadTracking.ini.
+        // Set true via [Debug] DisableMaskComp=true in CameraUnlock.ini.
         // Strictly a diagnostic switch: disables the mask compensation
         // subsystem (the head-rotation cancellation that's written into UE
         // SceneComponents) without disabling head tracking itself. Lets a
         // user with a hooking conflict get a working log without our most
-        // invasive runtime behaviour. Default false; not surfaced in
-        // standard config docs.
+        // invasive runtime behaviour. Default false.
         std::atomic<bool> g_disableMaskComp{false};
 
-        using cameraunlock::input::ChordGuarded;
         using cameraunlock::time::FrameClock;
 
         // Pipeline state. The hook fires on the render thread only, so all
@@ -123,17 +125,10 @@ namespace Subnautica2HeadTracking
         bool g_isRemoteConnection = false;
         bool g_remoteConnectionKnown = false;
 
-        // Per-axis sensitivity and inversion, applied to the smoothed output
-        // (last pipeline stage). Written once from HeadTracking.ini in
-        // BootstrapThread before the hook is installed.
-        float g_yawSens = 1.0f, g_pitchSens = 1.0f, g_rollSens = 1.0f;
-        bool  g_invertYaw = false, g_invertPitch = false, g_invertRoll = false;
-
         // Positional (6DOF) pipeline. Same single-render-thread access as the
-        // rotation pipeline - no locks. Defaults (sensitivity 1.0, limits
-        // 0.30/0.20/0.40/0.10m) come from PositionSettings, matching
-        // HeadTracking.ini's [Position] section. Position smoothing is the
-        // same LocalSmoothing/RemoteSmoothing pair the rotation pipeline uses.
+        // rotation pipeline - no locks. The limits come from CameraUnlock.ini's
+        // [Position] section. Position smoothing is the same
+        // LocalSmoothing/RemoteSmoothing pair the rotation pipeline uses.
         cameraunlock::PositionProcessor   g_posProcessor;
         cameraunlock::PositionInterpolator g_posInterp;
         std::atomic<bool> g_positionEnabled{true};
@@ -143,8 +138,9 @@ namespace Subnautica2HeadTracking
         // with g_positionEnabled through three states; the master toggle (End /
         // Ctrl+Shift+Y) still gates everything above both.
         std::atomic<bool> g_rotationEnabled{true};
-        // Tracking-mode cycle index: 0 = both, 1 = rotation only (position off),
-        // 2 = position only (rotation off). Advancing past 2 wraps to 0.
+        // Tracking-mode cycle index, cameraunlock::TrackingMode's number: 0 =
+        // both, 1 = rotation only (position off), 2 = position only (rotation
+        // off). Advancing past 2 wraps to 0.
         std::atomic<int> g_trackingMode{0};
         FrameClock g_posClock;
 
@@ -192,9 +188,9 @@ namespace Subnautica2HeadTracking
                 g_smoothedPitch = cameraunlock::math::Smooth(g_smoothedPitch, interp.pitch, eff, dt);
                 g_smoothedRoll  = cameraunlock::math::Smooth(g_smoothedRoll,  interp.roll,  eff, dt);
             }
-            outYaw   = g_smoothedYaw   * (g_invertYaw   ? -g_yawSens   : g_yawSens);
-            outPitch = g_smoothedPitch * (g_invertPitch ? -g_pitchSens : g_pitchSens);
-            outRoll  = g_smoothedRoll  * (g_invertRoll  ? -g_rollSens  : g_rollSens);
+            outYaw   = g_smoothedYaw;
+            outPitch = g_smoothedPitch;
+            outRoll  = g_smoothedRoll;
             return true;
         }
 
@@ -982,7 +978,6 @@ namespace Subnautica2HeadTracking
         std::atomic<std::uint64_t>  g_widgetCollectGen{0};
         std::atomic<std::uintptr_t> g_getOpacityFn{0};
         std::atomic<std::uintptr_t> g_getVisFn{0};
-        std::atomic<bool>           g_reticleMoveOn{true};
 
         // Tooltip widgets: see TooltipWidget comment above for the
         // world-hover vs button-bar discrimination. Snapshot map keyed by
@@ -1636,7 +1631,6 @@ namespace Subnautica2HeadTracking
         // Present hook device-removed the GPU when DLSS Frame Generation was
         // active, because Streamline owns swapchain presentation under FG.
         void DriveReticleMove() {
-            if (!g_reticleMoveOn.load(std::memory_order_relaxed)) return;
             const std::uintptr_t setTr = g_setRenderTranslationFn.load();
             if (!setTr) return;
             float dx = 0.0f, dy = 0.0f;
@@ -2861,19 +2855,6 @@ namespace Subnautica2HeadTracking
             return 0;
         }
 
-        // Narrow sibling of DllDir for the ANSI IniReader (GetPrivateProfile*A).
-        std::string DllDirNarrow(void* hModule)
-        {
-            char buf[MAX_PATH] = {};
-            GetModuleFileNameA(static_cast<HMODULE>(hModule), buf, MAX_PATH);
-            std::string path(buf);
-            const auto slash = path.find_last_of("\\/");
-            if (slash != std::string::npos) {
-                path.resize(slash + 1);
-            }
-            return path;
-        }
-
 #if SN2HT_DEV_HOTKEYS
         void SaveMaskMarks()
         {
@@ -3063,29 +3044,47 @@ namespace Subnautica2HeadTracking
 
             LoadMaskMarks();
 
-            // Config from HeadTracking.ini, next to the DLL. Every key the
-            // shipped INI documents is read here; absent file or keys fall
-            // back to the same defaults the INI ships with - a filesystem
-            // boundary, so default reads are correct here.
-            int yawModeKey = 0x22;  // Page Down
-            int udpPort = cameraunlock::UdpReceiver::kDefaultPort;
+            // CameraUnlock.ini, next to the DLL. The owner imports
+            // HeadTracking.ini, the file every earlier build read, while
+            // CameraUnlock.ini is absent, and never writes it.
+            std::wstring dllFolder = DllDir(module);
+            dllFolder.pop_back();
+            const Config settings = config::Load(dllFolder, cameraunlock::config::DefaultsFile::PerUser());
+            const int udpPort = settings.udp_port;
+            g_trackingEnabled.store(settings.enable_on_startup);
+            g_localSmoothing  = settings.local_smoothing;
+            g_remoteSmoothing = settings.remote_smoothing;
+            g_worldSpaceYaw.store(settings.world_space_yaw);
+            {
+                const cameraunlock::TrackingMode mode = config::StartupTrackingMode(settings);
+                const cameraunlock::TrackingModeChannels channels = cameraunlock::EncodeTrackingMode(mode);
+                g_trackingMode.store(static_cast<int>(mode));
+                g_rotationEnabled.store(channels.rotation_enabled);
+                g_positionEnabled.store(channels.position_enabled);
+            }
+            g_tooltipMoveOn.store(settings.tooltip_follow_reticle);
+            g_tooltipFollowScale.store(settings.tooltip_follow_scale);
+            // Debug-only escape hatch: turns off the mask compensation, the
+            // most invasive runtime behaviour, for a player with a hooking
+            // conflict with another DXGI/D3D12 interposer (Streamline, RTSS
+            // overlays, ReShade), without losing head tracking.
+            g_disableMaskComp.store(settings.disable_mask_comp);
             {
                 // SN2 axis mapping: tracker x/z are mirrored relative to the
                 // clean-camera basis, and both mirrors live in
                 // position_boundary.h, past the clamp. See the header for why
                 // the depth mirror cannot be an invert_z.
-                namespace pd = Subnautica2HeadTracking::Position;
                 cameraunlock::PositionSettings ps = g_posProcessor.GetSettings();
-                ps.sensitivity_x = pd::kSensitivityX;
-                ps.sensitivity_y = pd::kSensitivityY;
-                ps.sensitivity_z = pd::kSensitivityZ;
-                ps.invert_x = pd::kInvertX;
-                ps.invert_y = pd::kInvertY;
-                ps.invert_z = pd::kInvertZ;
-                ps.limit_x = pd::kLimitX;
-                pd::ApplyVerticalLimit(ps, pd::kLimitY);
-                ps.limit_z = pd::kLimitZ;
-                ps.limit_z_back = pd::kLimitZBack;
+                ps.limit_x      = settings.position_limit_x;
+                ps.limit_y      = settings.position_limit_y;
+                ps.limit_y_down = settings.position_limit_y_down;
+                ps.limit_z      = settings.position_limit_z;
+                ps.limit_z_back = settings.position_limit_z_back;
+                // Position runs on the same two smoothing parameters as
+                // rotation; there is no separate position smoothing key.
+                ps.local_smoothing  = settings.local_smoothing;
+                ps.remote_smoothing = settings.remote_smoothing;
+                g_posProcessor.SetSettings(ps);
 
                 // The position stream is true 6DOF anchored at the eyes: the
                 // rotation-induced eye swing in the data is real camera motion
@@ -3094,51 +3093,6 @@ namespace Subnautica2HeadTracking
                 // origin is at the pivot, inject ~0.15*sin(pitch) of spurious
                 // vertical motion instead), so it must stay off.
                 g_posProcessor.SetTrackerPivotForward(0.0f);
-
-                legacy::Config read;
-                legacy::Load(DllDirNarrow(module) + "HeadTracking.ini", read);
-                udpPort = read.udp_port;
-                g_trackingEnabled.store(read.enable_on_startup);
-                g_yawSens       = read.yaw_sensitivity;
-                g_pitchSens     = read.pitch_sensitivity;
-                g_rollSens      = read.roll_sensitivity;
-                g_invertYaw     = read.invert_yaw;
-                g_invertPitch   = read.invert_pitch;
-                g_invertRoll    = read.invert_roll;
-                g_localSmoothing  = read.local_smoothing;
-                g_remoteSmoothing = read.remote_smoothing;
-                g_reticleMoveOn.store(read.show_reticle);
-                g_worldSpaceYaw.store(read.world_space_yaw);
-
-                g_tooltipMoveOn.store(read.tooltip_follow_reticle);
-                g_tooltipFollowScale.store(read.tooltip_follow_scale);
-
-                g_positionEnabled.store(read.position_enabled);
-                ps.sensitivity_x = read.position_sensitivity_x;
-                ps.sensitivity_y = read.position_sensitivity_y;
-                ps.sensitivity_z = read.position_sensitivity_z;
-                ps.invert_x      = read.position_invert_x;
-                ps.invert_y      = read.position_invert_y;
-                ps.invert_z      = read.position_invert_z;
-                ps.limit_x       = read.limit_x;
-                pd::ApplyVerticalLimit(ps, read.limit_y);
-                ps.limit_z       = read.limit_z;
-                ps.limit_z_back  = read.limit_z_back;
-
-                yawModeKey = read.yaw_mode_key;
-
-                // Debug-only escape hatch: turns off the mask compensation,
-                // the most invasive runtime behaviour, for a player with a
-                // hooking conflict with another DXGI/D3D12 interposer
-                // (Streamline, RTSS overlays, ReShade), without losing head
-                // tracking.
-                g_disableMaskComp.store(read.disable_mask_comp);
-
-                // Position runs on the same two smoothing parameters as
-                // rotation; there is no separate position smoothing key.
-                ps.local_smoothing  = g_localSmoothing;
-                ps.remote_smoothing = g_remoteSmoothing;
-                g_posProcessor.SetSettings(ps);
             }
 
             g_receiver = std::make_unique<cameraunlock::UdpReceiver>();
@@ -3151,61 +3105,45 @@ namespace Subnautica2HeadTracking
 
             g_hotkeys = std::make_unique<cameraunlock::input::HotkeyPoller>();
 
-            // Standard CameraUnlock bindings. Every action is reachable both
-            // from the nav cluster and from a Ctrl+Shift chord drawn from the
-            // T/Y/U/G/H/J cluster, so keyboards without a nav cluster still
-            // work. Both variants fire the same handler; the chord variant is
-            // gated on the Ctrl+Shift modifier (ChordGuarded) and edge-detected
-            // on its letter key by the poller, so the bare letter is a no-op
-            // during gameplay.
+            // Every action's keys come from its list in CameraUnlock.ini, the
+            // Ctrl+Shift chords included, so each is rebindable.
             const auto toggleTracking = []() {
                 const bool now = !g_trackingEnabled.exchange(!g_trackingEnabled.load());
                 Log::Line("Tracking toggled: %s", now ? "ON" : "OFF");
             };
-            // Three-state tracking-mode cycle:
-            //   0 normal      -> rotation + position
-            //   1 rotation    -> position disabled
-            //   2 position    -> rotation disabled
-            // advancing past 2 wraps back to 0.
+            // Three-state tracking-mode cycle: rotation + position, rotation
+            // only, position only, and back. Each step is saved.
             const auto cycleTrackingMode = []() {
                 const int next = (g_trackingMode.load() + 1) % 3;
                 g_trackingMode.store(next);
-                switch (next) {
-                    case 0:
-                        g_rotationEnabled.store(true);
-                        g_positionEnabled.store(true);
-                        break;
-                    case 1:
-                        g_rotationEnabled.store(true);
-                        g_positionEnabled.store(false);
-                        break;
-                    case 2:
-                        g_rotationEnabled.store(false);
-                        g_positionEnabled.store(true);
-                        break;
-                }
+                const auto mode = static_cast<cameraunlock::TrackingMode>(next);
+                const cameraunlock::TrackingModeChannels channels = cameraunlock::EncodeTrackingMode(mode);
+                g_rotationEnabled.store(channels.rotation_enabled);
+                g_positionEnabled.store(channels.position_enabled);
                 static const char* names[] = {
                     "NORMAL (rotation + position)",
                     "ROTATION ONLY (position off)",
                     "POSITION ONLY (rotation off)"
                 };
                 Log::Line("tracking-mode -> %d  (%s)", next, names[next]);
+                config::SaveTrackingMode(mode);
             };
             const auto toggleYawMode = []() {
                 const bool now = !g_worldSpaceYaw.load();
                 g_worldSpaceYaw.store(now);
                 Log::Line("yaw-mode -> %s", now ? "WORLD (horizon-locked)" : "LOCAL (camera-local)");
+                config::SaveWorldSpaceYaw(now);
             };
-
-            // Toggle tracking: End / Ctrl+Shift+Y
-            g_hotkeys->SetToggleKey(VK_END, toggleTracking);
-            g_hotkeys->AddHotkey(0x59 /* Y */, ChordGuarded(toggleTracking));
-            // Cycle tracking mode: Page Up / Ctrl+Shift+G
-            g_hotkeys->AddHotkey(VK_PRIOR, cycleTrackingMode);
-            g_hotkeys->AddHotkey(0x47 /* G */, ChordGuarded(cycleTrackingMode));
-            // Yaw mode (world/local): Page Down (or [Hotkeys] ToggleYawMode) / Ctrl+Shift+H
-            g_hotkeys->AddHotkey(yawModeKey, toggleYawMode);
-            g_hotkeys->AddHotkey(0x48 /* H */, ChordGuarded(toggleYawMode));
+            // The table's hotkey codec lets only a list ParseKeyBindings reads
+            // into the settings.
+            const auto registerList = [](const std::string& list, std::function<void()> action) {
+                cameraunlock::input::KeyBindingsParseResult parsed = cameraunlock::input::ParseKeyBindings(list);
+                if (!parsed.ok()) throw std::logic_error("hotkey list '" + list + "': " + parsed.error);
+                cameraunlock::input::RegisterKeyBindings(*g_hotkeys, parsed.bindings, std::move(action));
+            };
+            registerList(settings.toggle_key, toggleTracking);
+            registerList(settings.cycle_tracking_mode_key, cycleTrackingMode);
+            registerList(settings.yaw_mode_key, toggleYawMode);
 
 #if SN2HT_DEV_HOTKEYS
             // Discovery / tuning controls. Off in shipping builds - see
@@ -3214,18 +3152,18 @@ namespace Subnautica2HeadTracking
             // F3 / F4: live-tune [Tooltip] FollowScale by +/-0.05 while the
             // prompt is on screen. The right value is 1 / your viewport DPI
             // scale - rather than guess, dial it in until widget speed matches
-            // reticle speed, then copy the logged value into HeadTracking.ini.
+            // reticle speed, then copy the logged value into CameraUnlock.ini.
             g_hotkeys->AddHotkey(VK_F3, []() {
                 float s = g_tooltipFollowScale.load();
                 s = std::max(0.05f, s - 0.10f);
                 g_tooltipFollowScale.store(s);
-                Log::Line("tooltip-scale -> %.2f (save to [Tooltip] FollowScale in HeadTracking.ini)", s);
+                Log::Line("tooltip-scale -> %.2f (save to [Tooltip] FollowScale in CameraUnlock.ini)", s);
             });
             g_hotkeys->AddHotkey(VK_F4, []() {
                 float s = g_tooltipFollowScale.load();
                 s = std::min(3.0f, s + 0.10f);
                 g_tooltipFollowScale.store(s);
-                Log::Line("tooltip-scale -> %.2f (save to [Tooltip] FollowScale in HeadTracking.ini)", s);
+                Log::Line("tooltip-scale -> %.2f (save to [Tooltip] FollowScale in CameraUnlock.ini)", s);
             });
 
             g_hotkeys->AddHotkey(VK_F6, []() {
@@ -3551,7 +3489,9 @@ namespace Subnautica2HeadTracking
             });
 #endif
             g_hotkeys->Start();
-            Log::Line("Hotkeys armed: End/Ctrl+Shift+Y=toggle  PgUp/Ctrl+Shift+G=tracking-mode-cycle  PgDn/Ctrl+Shift+H=yaw-mode(world/local)");
+            Log::Line("Hotkeys armed: toggle=[%s]  tracking-mode-cycle=[%s]  yaw-mode(world/local)=[%s]",
+                settings.toggle_key.c_str(), settings.cycle_tracking_mode_key.c_str(),
+                settings.yaw_mode_key.c_str());
 #if SN2HT_DEV_HOTKEYS
             Log::Line("Dev hotkeys: F6=mask-diag  F7=inject-mode-next  F8=position-toggle  ScrollLock=hud-dump  Ins/Del=mask-slot  F9=comp-toggle  F10=comp-mode  F11=mark/unmark  F12=clear-marks");
             Log::Line("Inject modes: 0=ALL  1..11=single-caller  12=NONE  13=all-perframe(5-9)  14=all-tier1+2(1-4)");

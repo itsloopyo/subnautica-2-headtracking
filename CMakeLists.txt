@@ -102,6 +102,7 @@ add_library(${MOD_NAME} SHARED
     src/Subnautica2HeadTracking/builds/build_registry.cpp
     src/Subnautica2HeadTracking/builds/steam_offsets.cpp
     src/Subnautica2HeadTracking/builds/gdk_offsets.cpp
+    src/Subnautica2HeadTracking/config.cpp
     src/legacy_config/legacy_config.cpp
 )
 
@@ -144,10 +145,10 @@ set_target_properties(${MOD_NAME} PROPERTIES
     OUTPUT_NAME "dxgi"
 )
 
-# Behaviour lock for the lean boundary and for the shipped INI agreeing with
-# the code defaults. A separate executable linking none of the hook machinery,
+# Behaviour lock for the lean boundary, the config tests and the config
+# differential test. Separate executables linking none of the hook machinery,
 # so `pixi run test` runs anywhere the mod builds, with no game installed.
-option(SN2HT_BUILD_TESTS "Build the position behaviour tests and the config differential test" ON)
+option(SN2HT_BUILD_TESTS "Build the position behaviour tests and the config tests" ON)
 if(SN2HT_BUILD_TESTS)
     enable_testing()
 
@@ -156,20 +157,40 @@ if(SN2HT_BUILD_TESTS)
         src/Subnautica2HeadTracking
         cameraunlock-core/cpp/include
     )
-    target_compile_definitions(sn2ht_position_tests PRIVATE
-        SN2HT_SHIPPED_INI="${CMAKE_CURRENT_SOURCE_DIR}/HeadTracking.ini"
-    )
     target_link_libraries(sn2ht_position_tests PRIVATE cameraunlock)
     add_test(NAME sn2ht_position_tests COMMAND sn2ht_position_tests)
+
+    # The committed config against the table's fresh render, and the saves.
+    # `sn2ht_config_tests --render-config <path>` is pixi run render-config.
+    add_executable(sn2ht_config_tests
+        tests/config_tests.cpp
+        src/Subnautica2HeadTracking/config.cpp
+        src/legacy_config/legacy_config.cpp
+    )
+    target_include_directories(sn2ht_config_tests PRIVATE
+        src
+        src/Subnautica2HeadTracking
+        cameraunlock-core/cpp/include
+    )
+    target_compile_definitions(sn2ht_config_tests PRIVATE
+        SN2HT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    target_link_libraries(sn2ht_config_tests PRIVATE cameraunlock)
+    if(MSVC)
+        target_compile_options(sn2ht_config_tests PRIVATE /W4 /WX /EHsc)
+    endif()
+    add_test(NAME sn2ht_config_tests COMMAND sn2ht_config_tests)
 
     # The canonical config conversion's differential test: v0.6.2's reader and
     # startup code (the oracle, transcribed in tests/config_differential/oracle
     # beside byte copies of the v0.6.2 headers it includes) against the frozen
-    # reader in src/legacy_config/.
+    # reader in src/legacy_config/, and that against the config owner's
+    # migration into CameraUnlock.ini.
     set(SN2HT_DIFFERENTIAL_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tests/config_differential)
     add_executable(sn2ht_config_differential
         ${SN2HT_DIFFERENTIAL_DIR}/differential_tests.cpp
         ${SN2HT_DIFFERENTIAL_DIR}/oracle/oracle_reader.cpp
+        src/Subnautica2HeadTracking/config.cpp
         src/legacy_config/legacy_config.cpp
     )
     target_include_directories(sn2ht_config_differential PRIVATE
@@ -186,6 +207,12 @@ if(SN2HT_BUILD_TESTS)
         target_compile_options(sn2ht_config_differential PRIVATE /W4 /WX /EHsc)
     endif()
     add_test(NAME sn2ht_config_differential COMMAND sn2ht_config_differential)
+    # Core's canonical config lint over the committed file and every file the
+    # differential test migrated, which it writes beside itself under migrated\.
+    add_test(NAME sn2ht_config_lint COMMAND node
+             ${SN2HT_DIFFERENTIAL_DIR}/lint-migrated.mjs
+             $<TARGET_FILE_DIR:sn2ht_config_differential>/migrated)
+    set_tests_properties(sn2ht_config_lint PROPERTIES DEPENDS sn2ht_config_differential)
 
     # What the differential test compiles is pinned by hash, line endings aside:
     # the oracle's byte copies must stay v0.6.2's (git show

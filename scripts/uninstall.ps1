@@ -101,7 +101,9 @@ foreach ($name in $exeNames) {
     }
 }
 
-$modFiles  = @('dxgi.dll', 'dxgi_orig.dll', 'HeadTracking.ini')
+# CameraUnlock.ini and HeadTracking.ini are the player's settings, and an
+# older version of the mod reads HeadTracking.ini, so both stay.
+$modFiles  = @('dxgi.dll', 'dxgi_orig.dll')
 $legacyFiles = @('Subnautica2HeadTracking.asi', 'winmm.dll', 'dinput8.dll', 'xinput1_3.dll')
 $logArtefacts = @('Subnautica2HeadTracking.log', 'Subnautica2HeadTracking.prev.log', 'Subnautica2HeadTracking.marks.txt')
 
@@ -116,7 +118,7 @@ foreach ($install in $installs) {
     Write-Host "=== $($install.Label): $exeDir ===" -ForegroundColor Cyan
 
     # Restore pre-mod shims from .backup unless -Force was passed.
-    foreach ($file in 'dxgi.dll','HeadTracking.ini') {
+    foreach ($file in 'dxgi.dll') {
         $current = Join-Path $exeDir $file
         $backup  = "$current.backup"
         if (Test-Path $backup) {

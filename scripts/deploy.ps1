@@ -3,8 +3,10 @@ param([string]$Configuration = "Release")
 
 $ErrorActionPreference = "Stop"
 
-# Dev convenience: build a Release dxgi.dll and drop it (plus dxgi_orig.dll
-# and HeadTracking.ini) next to the SN2 exe. Iterates every detected install
+# Dev convenience: build a Release dxgi.dll and drop it (plus dxgi_orig.dll)
+# next to the SN2 exe. It copies no config: the mod creates CameraUnlock.ini
+# itself, and the committed HeadTracking.ini would land on the developer's
+# own legacy file. Iterates every detected install
 # (Steam + Xbox/Game Pass) so both stores get the mod in one command.
 # Mirrors what install.cmd does for end users but skips the unified-launcher
 # arg parser and state file - this is for iterating between Ghidra and the
@@ -18,7 +20,6 @@ if (-not (Test-Path $dxgiProxy)) {
     throw "Build output not found at $dxgiProxy. Run 'pixi run build' first."
 }
 
-$ini = Join-Path $projectDir "HeadTracking.ini"
 $cfg = Get-GameConfig -GameId 'subnautica-2'
 
 # Build the list of installs to hit. Steam is whatever Find-GamePath returns
@@ -81,10 +82,6 @@ foreach ($install in $installs) {
 
     Copy-Item $dxgiProxy -Destination $exeDir -Force
     Write-Host "  Deployed dxgi.dll"
-    if (Test-Path $ini) {
-        Copy-Item $ini -Destination $exeDir -Force
-        Write-Host "  Deployed HeadTracking.ini"
-    }
     # Default mask comp marks: deploy only when absent so a dev iterating on
     # F11 marks in-game doesn't get their tuned file stomped by every redeploy.
     $marksSrc = Join-Path $projectDir 'config/default-mask-marks.txt'

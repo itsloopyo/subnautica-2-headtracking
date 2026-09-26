@@ -17,7 +17,10 @@ Set-StrictMode -Version Latest
 # Deployment per install:
 #   1. Plant System32\dxgi.dll as dxgi_orig.dll (idempotent; existing copy kept)
 #   2. Back up any pre-existing dxgi.dll to dxgi.dll.backup (first install only)
-#   3. Copy dxgi.dll + HeadTracking.ini from plugins/ next to the exe
+#   3. Copy dxgi.dll from plugins/ next to the exe. No config is copied: the
+#      mod creates CameraUnlock.ini at its first launch, importing
+#      HeadTracking.ini, the file earlier versions read, while
+#      CameraUnlock.ini is absent.
 #   4. Write .headtracking-state.json at the install root
 #
 # If $GivenPath is supplied, it overrides detection and is treated as a single
@@ -115,7 +118,7 @@ if ($installs.Count -eq 0) {
     exit 1
 }
 
-# Source dir for the planted DLL + ini. Release ZIP: plugins/ sits next to
+# Source dir for the planted DLL. Release ZIP: plugins/ sits next to
 # install.ps1 ($scriptDir). Dev-tree fallback: $projectRoot/plugins.
 $srcDir = Join-Path $scriptDir 'plugins'
 if (-not (Test-Path $srcDir)) {
@@ -125,7 +128,6 @@ if (-not (Test-Path $srcDir)) {
     throw "plugins/ folder not found next to install.ps1. Installer ZIP is corrupt."
 }
 $dxgiProxy = Join-Path $srcDir 'dxgi.dll'
-$ini = Join-Path $srcDir 'HeadTracking.ini'
 if (-not (Test-Path $dxgiProxy)) { throw "dxgi.dll missing from plugins/. Installer ZIP is corrupt." }
 
 $systemDxgi = Join-Path $env:SystemRoot 'System32\dxgi.dll'
@@ -162,7 +164,7 @@ foreach ($install in $installs) {
         Write-Host "  dxgi_orig.dll already present, keeping existing copy"
     }
 
-    foreach ($file in 'dxgi.dll','HeadTracking.ini') {
+    foreach ($file in 'dxgi.dll') {
         $src = Join-Path $srcDir $file
         if (-not (Test-Path $src)) { continue }
         $dst = Join-Path $exeDir $file

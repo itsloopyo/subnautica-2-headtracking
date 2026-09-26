@@ -7,7 +7,8 @@ platforms = ["win-64"]
 
 [dependencies]
 cmake = ">=3.28"
-# Packaging runs core's config descriptor check (Copy-SharedBundle) with node.
+# Packaging runs core's config descriptor check (Copy-SharedBundle) with node,
+# and `test` and render-config run core's canonical config scripts with it.
 # Pinned to the release core's own lock resolves.
 nodejs = "==26.5.0"
 
@@ -26,9 +27,17 @@ setup = { cmd = """
 build = { cmd = "cmake --build build --config Release", depends-on = ["setup"] }
 build-debug = { cmd = "cmake --build build --config Debug", depends-on = ["setup"] }
 
-# The lean-boundary behaviour lock and the config differential test, which holds
-# the frozen HeadTracking.ini reader to v0.6.2's. Needs no game install.
+# The lean-boundary behaviour lock, the config tests, the config differential
+# test, which holds the frozen HeadTracking.ini reader to v0.6.2's and the
+# migration into CameraUnlock.ini to the frozen reader, and core's canonical
+# config lint over every file that test migrated. Needs no game install.
 test = { cmd = "ctest --test-dir build -C Release --output-on-failure", depends-on = ["build"] }
+
+# Rewrites HeadTracking.ini, the committed CameraUnlock.ini (the path core's
+# data/config-format.json records), from the config table after a change to a
+# row, a comment or a default, then writes the launcher manifest's config
+# descriptor per_game from it. sn2ht_config_tests fails until it has run.
+render-config = { cmd = "build/Release/sn2ht_config_tests.exe --render-config HeadTracking.ini && node cameraunlock-core/scripts/encode-seed.mjs", depends-on = ["build"] }
 
 install = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/deploy.ps1 Release", depends-on = ["build"] }
 uninstall = "powershell -ExecutionPolicy Bypass -File scripts/uninstall.ps1"
@@ -43,6 +52,10 @@ clean = { cmd = """
 
 # Full release workflow - creates tag and pushes to trigger CI release
 release = "powershell -ExecutionPolicy Bypass -File scripts/release.ps1"
+
+# Checks the newest release/*-installer.zip against the launcher manifest rules
+# and the canonical config's delivery rules. Run after package.
+validate-manifest = "node cameraunlock-core/scripts/validate-manifest.mjs"
 
 # Run a Ghidra headless script from scripts/ghidra/ against the game EXE.
 # First invocation auto-imports + analyses the binary into C:\temp\subnautica-2.

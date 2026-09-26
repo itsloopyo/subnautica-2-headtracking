@@ -4,6 +4,9 @@
 
 ### Added
 
+- A setting set to `default` in `CameraUnlock.ini` takes its value from `Defaults.ini`, which every head tracking mod that keeps its settings in `CameraUnlock.ini` reads. Head tracking mods that keep their settings in another file do not read it, and neither do earlier versions of this mod. Writing a value in place of `default` changes that setting for this game only. When the mod saves a setting that a hotkey changed in game, it writes the new value in place of `default`, so that setting no longer follows `Defaults.ini` in this game until you set it to `default` again.
+- `Defaults.ini` is `%AppData%\CameraUnlock\Defaults.ini` on Windows; `$XDG_CONFIG_HOME/CameraUnlock/Defaults.ini` on Linux, or `~/.config/CameraUnlock/Defaults.ini` where `XDG_CONFIG_HOME` is not set, under Wine and Proton too; and `~/Library/Application Support/CameraUnlock/Defaults.ini` on macOS. The mod's log, where it writes one, names the file it read.
+- When the mod starts and finds no `Defaults.ini`, it creates one holding the built-in values, unless Windows runs the game as a packaged app. The mod never changes `Defaults.ini` after that.
 - Support for the 2026-09-03 patch on both stores: Steam build 25085363 and
   Xbox/Game Pass package 0.12.8456.0. Both are new profiles, so anyone still on
   an earlier build keeps matching the profile they already had.
@@ -30,6 +33,23 @@
 
 ### Changed
 
+- Settings move to `CameraUnlock.ini`, in `Subnautica2\Binaries\Win64\` for Steam and `Subnautica2\Binaries\WinGDK\` for Xbox Game Pass. Earlier versions of the mod kept these settings in `HeadTracking.ini`, in the same folder. The first time this version starts and finds no `CameraUnlock.ini`, it reads your settings from `HeadTracking.ini` and writes them into `CameraUnlock.ini`. It never changes `HeadTracking.ini`, and does not read it again while `CameraUnlock.ini` exists.
+- A setting that the defaults the README shows set to `default` is written as `default` when the value imported for it equals its default at that start, which is the value `Defaults.ini` gives it, or the built-in value where `Defaults.ini` gives none. It then follows `Defaults.ini`. Every other setting is written with the value imported for it.
+- `RotationEnabled` and `PositionEnabled` are one setting here, the tracking mode, so both are written as `default` or neither is.
+- Comments, and keys the mod never read, are not carried over. Nor are these, where your old file had them:
+  - A sensitivity, scale, deadzone, response curve or axis inversion you changed from its default. Set these in your tracker instead.
+  - Reticle settings, and a key that toggled the reticle.
+  - The setting for a feature that earlier versions shipped switched off while it was untested. It now follows the mod's default.
+- An older version of the mod reads `HeadTracking.ini` and never reads `CameraUnlock.ini`, so a setting you change after updating is not in `HeadTracking.ini`.
+- Deleting only `CameraUnlock.ini` makes the next start read `HeadTracking.ini` again. To go back to the defaults, replace everything in `CameraUnlock.ini` with the defaults the README shows. Every setting they set to `default` then follows `Defaults.ini`.
+- Hotkeys are written as key names, and each hotkey lists every key that triggers it, the Ctrl+Shift chord included: `ToggleKey=End, Ctrl+Shift+Y`. End, Page Up and the three chords were fixed in code and can now be changed like any other key; `[Hotkeys] ToggleYawMode`, a virtual-key code, becomes `YawModeKey`, which your old code is imported into beside `Ctrl+Shift+H`.
+- A hotkey bound to a plain key no longer fires while Ctrl and Shift are both held, so Ctrl+Shift with that key reaches only a binding that names the chord.
+- The tracking mode (Page Up / Ctrl+Shift+G) and the yaw mode (Page Down / Ctrl+Shift+H) are saved to `CameraUnlock.ini` when you change them, and the game starts in the mode you left it in. Turning tracking on or off (End / Ctrl+Shift+Y) is still not saved; the game starts with head tracking on or off as `EnableOnStartup` says.
+- `[Position] Enabled = false` is imported as the startup tracking mode, rotation only. Page Up now steps on from the mode the game started in, so the first press from rotation only goes to position only; it used to go to rotation only again.
+- The keys are renamed to the names every head tracking mod on `CameraUnlock.ini` uses: `[Network] Port` is `UdpPort`, `EnableOnStartup` and `WorldSpaceYaw` are in `[General]`, `LocalSmoothing` and `RemoteSmoothing` in `[Smoothing]`, and the lean limits are `PositionLimitX`, `PositionLimitZ` and `PositionLimitZBack`. `LimitY` set both vertical limits, so it becomes `PositionLimitY` (up) and `PositionLimitYDown` (down), both imported from it. `[Tooltip] FollowReticle`, `[Tooltip] FollowScale` and `[Debug] DisableMaskComp` keep their names.
+- A `HeadTracking.ini` from v0.6.0 or earlier that still has `InvertX = true`, `InvertZ = true`, `LimitZ = 0.10` and `LimitZBack = 0.40` moved the view the wrong way when you leaned in v0.6.1 and v0.6.2. The two inversions are not carried over, so leaning moves the view the right way again, and the two limits are, so a forward lean stops at 0.10 m and a backward one at 0.40 m. Set `PositionLimitZ` and `PositionLimitZBack` in `CameraUnlock.ini` to `default` for 0.40 m forward and 0.10 m back.
+- A lean limit in `HeadTracking.ini` below 0 or above 10 cannot be written into `CameraUnlock.ini`. The mod then leaves `HeadTracking.ini` as it is, runs on the settings it read from it, saves nothing that session, names the value in its log, and tries again at the next start.
+- The installer and uninstaller no longer touch a settings file. Earlier installers copied their own `HeadTracking.ini` over yours on every install, and the uninstaller deleted it; `CameraUnlock.ini` and `HeadTracking.ini` now stay as they are through both, and neither release ZIP nor the launcher carries a settings file.
 - The `[Position]` Z keys now mean what they say. The mod shipped
   `InvertZ = true` with `LimitZ` and `LimitZBack` swapped: the two errors
   cancelled, so the lean was correct, but `LimitZ` named the backward limit here
@@ -63,6 +83,12 @@
 - smoothing is now two keys in `[Tracking]`: `LocalSmoothing` (default 0.0) for a tracker running on this machine and `RemoteSmoothing` (default 0.15) for a remote device on the network, selected per connection from the packet source address
 - removed `[Tracking] Smoothing` and `[Position] Smoothing`; both rotation and position use the same pair of values
 - removed the hidden 0.15 baseline smoothing floor, so a local tracker now gets zero-latency tracking by default
+
+### Removed
+
+- The reticle setting, `[Tracking] ShowReticle`. The game's reticle always follows your aim.
+- The sensitivity and axis inversion settings: `[Tracking] YawSensitivity`, `PitchSensitivity`, `RollSensitivity`, `InvertYaw`, `InvertPitch` and `InvertRoll`, and `[Position] SensitivityX`, `SensitivityY`, `SensitivityZ`, `InvertX`, `InvertY` and `InvertZ`. Set these in your tracker app instead.
+- With these settings at the defaults v0.6.1 and v0.6.2 shipped in the installer, the Nexus ZIP and the launcher, the camera moves as it did before.
 
 ### Fixed
 

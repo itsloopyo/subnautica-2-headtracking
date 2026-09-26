@@ -5,31 +5,13 @@
 
 namespace Subnautica2HeadTracking::Position {
 
-// Defaults for the INI's [Position] section. The mod writes no INI of its own,
-// so a user who deletes HeadTracking.ini falls back to these; the shipped file
-// and the launcher-manifest seed must therefore repeat them exactly.
-// tests/position_tests.cpp checks that they do.
-inline constexpr float kSensitivityX = 1.0f;
-inline constexpr float kSensitivityY = 1.0f;
-inline constexpr float kSensitivityZ = 1.0f;
-inline constexpr bool  kInvertX = false;
-inline constexpr bool  kInvertY = false;
-inline constexpr bool  kInvertZ = false;
+// The lean budgets CameraUnlock.ini starts from, in metres: core's
+// PositionSettings defaults, which are also the canonical config schema's.
 inline constexpr float kLimitX = cameraunlock::PositionSettings{}.limit_x;
 inline constexpr float kLimitY = cameraunlock::PositionSettings{}.limit_y;
+inline constexpr float kLimitYDown = cameraunlock::PositionSettings{}.limit_y_down;
 inline constexpr float kLimitZ = cameraunlock::PositionSettings{}.limit_z;
 inline constexpr float kLimitZBack = cameraunlock::PositionSettings{}.limit_z_back;
-
-// Apply the INI's single vertical limit to both vertical bounds.
-//
-// The processor clamps y as [-limit_y_down, +limit_y], and limit_y_down is a
-// separate field carrying its own default. The INI exposes one LimitY, so it
-// has to reach both bounds; assigning limit_y alone widened the upward budget
-// and silently left downward travel pinned at the core's 0.20m.
-inline void ApplyVerticalLimit(cameraunlock::PositionSettings& settings, float limitY) {
-    settings.limit_y = limitY;
-    settings.limit_y_down = limitY;
-}
 
 // UE works in centimetres; the processor hands out metres.
 inline constexpr double kMetersToUE = 100.0;
@@ -42,10 +24,7 @@ inline constexpr double kMetersToUE = 100.0;
 // processor's InvertZ. The processor inverts BEFORE its asymmetric clamp of
 // [-LimitZ, +LimitZBack], so flipping the sign there hands the generous 0.40m
 // allowance to leaning back and the 0.10m anti-clipping allowance to leaning
-// in. This mod compensated for that by shipping LimitZ and LimitZBack swapped,
-// which behaved correctly but meant the INI's two Z keys named the opposite
-// direction to every other mod's. Negative z is the forward lean throughout
-// the library.
+// in. Negative z is the forward lean throughout the library.
 //
 // Sway is negated here for the same reason of keeping one place to look. X is
 // clamped symmetrically, so moving it changes nothing but where it is written.
