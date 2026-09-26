@@ -102,10 +102,12 @@ add_library(${MOD_NAME} SHARED
     src/Subnautica2HeadTracking/builds/build_registry.cpp
     src/Subnautica2HeadTracking/builds/steam_offsets.cpp
     src/Subnautica2HeadTracking/builds/gdk_offsets.cpp
+    src/legacy_config/legacy_config.cpp
 )
 
 target_include_directories(${MOD_NAME} PRIVATE
     src/Subnautica2HeadTracking
+    src
 )
 
 target_compile_definitions(${MOD_NAME} PRIVATE
@@ -145,8 +147,10 @@ set_target_properties(${MOD_NAME} PROPERTIES
 # Behaviour lock for the lean boundary and for the shipped INI agreeing with
 # the code defaults. A separate executable linking none of the hook machinery,
 # so `pixi run test` runs anywhere the mod builds, with no game installed.
-option(SN2HT_BUILD_TESTS "Build the position behaviour tests" ON)
+option(SN2HT_BUILD_TESTS "Build the position behaviour tests and the config differential test" ON)
 if(SN2HT_BUILD_TESTS)
+    enable_testing()
+
     add_executable(sn2ht_position_tests tests/position_tests.cpp)
     target_include_directories(sn2ht_position_tests PRIVATE
         src/Subnautica2HeadTracking
@@ -156,4 +160,66 @@ if(SN2HT_BUILD_TESTS)
         SN2HT_SHIPPED_INI="${CMAKE_CURRENT_SOURCE_DIR}/HeadTracking.ini"
     )
     target_link_libraries(sn2ht_position_tests PRIVATE cameraunlock)
+    add_test(NAME sn2ht_position_tests COMMAND sn2ht_position_tests)
+
+    # The canonical config conversion's differential test: v0.6.2's reader and
+    # startup code (the oracle, transcribed in tests/config_differential/oracle
+    # beside byte copies of the v0.6.2 headers it includes) against the frozen
+    # reader in src/legacy_config/.
+    set(SN2HT_DIFFERENTIAL_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tests/config_differential)
+    add_executable(sn2ht_config_differential
+        ${SN2HT_DIFFERENTIAL_DIR}/differential_tests.cpp
+        ${SN2HT_DIFFERENTIAL_DIR}/oracle/oracle_reader.cpp
+        src/legacy_config/legacy_config.cpp
+    )
+    target_include_directories(sn2ht_config_differential PRIVATE
+        src
+        src/Subnautica2HeadTracking
+        ${SN2HT_DIFFERENTIAL_DIR}
+        cameraunlock-core/cpp/include
+    )
+    target_compile_definitions(sn2ht_config_differential PRIVATE
+        SN2HT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    target_link_libraries(sn2ht_config_differential PRIVATE cameraunlock)
+    if(MSVC)
+        target_compile_options(sn2ht_config_differential PRIVATE /W4 /WX /EHsc)
+    endif()
+    add_test(NAME sn2ht_config_differential COMMAND sn2ht_config_differential)
+
+    # What the differential test compiles is pinned by hash, line endings aside:
+    # the oracle's byte copies must stay v0.6.2's (git show
+    # v0.6.2:src/Subnautica2HeadTracking/<file>), the core sources both readers
+    # compile must stay the ones v0.6.2 was built with (core bd22895), and the
+    # frozen reader is never edited.
+    function(sn2ht_require_hash path expected)
+        file(READ "${path}" text)
+        string(REPLACE "\r" "" text "${text}")
+        string(SHA256 actual "${text}")
+        if(NOT actual STREQUAL expected)
+            message(FATAL_ERROR "${path} has changed (SHA-256 of its text ${actual}, pinned "
+                                "${expected}). The config differential test compares against "
+                                "exactly this file; see CMakeLists.txt.")
+        endif()
+    endfunction()
+    set(SN2HT_CORE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/cameraunlock-core/cpp)
+    foreach(pinned
+            "${SN2HT_DIFFERENTIAL_DIR}/oracle/src/position_boundary.h|c292ea3287c594fe1706e8e035e6a5c968f9fcf28edee09093227fa7268e89af"
+            "${SN2HT_DIFFERENTIAL_DIR}/oracle/src/logging.h|71e3d4f18b0324310c1e2357e282716d7d1b49e516b5cc46e720c7453fd014bf"
+            "${SN2HT_CORE_DIR}/include/cameraunlock/config/ini_reader.h|a7ffb44210ff59672fa97e8e5feaa2cb3e81938fcc0334a384c68bc371b3857a"
+            "${SN2HT_CORE_DIR}/src/config/ini_reader.cpp|e01515c2656aaf533bae4350dc45b702c3e3d4043935743dcc9bd5ea581fbe1c"
+            "${SN2HT_CORE_DIR}/include/cameraunlock/data/position_settings.h|b24dceb8e25475aebc5a468a5c7362a4a4e64204d183d1408525345f32f547f5"
+            "${SN2HT_CORE_DIR}/include/cameraunlock/math/smoothing_utils.h|fc2146f8c585e5f610c7234e302f59de4945679cfa28ff479ca47477ec073f22"
+            "${SN2HT_CORE_DIR}/include/cameraunlock/protocol/udp_receiver.h|7e452809960190720ddff64c4a33ac41d43695fae66d37d4ddecc06dd0f9c4d8"
+            "${SN2HT_CORE_DIR}/include/cameraunlock/processing/position_processor.h|9963726117bdbc354170b8c77f2d95cf9337af8de55435eae97a0f33c47fcc87"
+            "${SN2HT_CORE_DIR}/include/cameraunlock/logging/file_log.h|43bdd2ef8554c78e5f440333463750c13b95110fe672b0b6e273244df9e7d169"
+            "${SN2HT_CORE_DIR}/src/logging/file_log.cpp|73c53c2baa06bbfebe8211f62678aa2b60cb95f604743d3686951ba56b87ea47"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/legacy_config/legacy_config.h|af6049e1aa5985625cfc03fb358ce797b2bbf11b84a00c078cbe3fc380851445"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/legacy_config/legacy_config.cpp|b69eae157a3536021e9141a64e20b8da711a6ff92f7d16e2bb9c9b5f240a4408")
+        string(REPLACE "|" ";" pair "${pinned}")
+        list(GET pair 0 pinned_path)
+        list(GET pair 1 pinned_hash)
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${pinned_path}")
+        sn2ht_require_hash("${pinned_path}" "${pinned_hash}")
+    endforeach()
 endif()

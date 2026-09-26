@@ -1,0 +1,28 @@
+# What the differential test compares, and where each file came from.
+# Columns: role, source (commit:path, or the path in this repo), sha256 of the bytes.
+# v0.6.2 (commit d4b8deb, tag object 5cdc845) is the newest published build and the rolling dev
+# build: the repo publishes v* releases only, and no predecessor repo shipped this mod. It pinned
+# core bd22895. src/ is byte for byte the same at v0.6.2 and at 6cbedf1, the commit the reader
+# was frozen at, and every core source either reader compiles holds the same bytes at bd22895
+# and at the current pin, so comparison 1 finds no difference.
+published reader	v0.6.2:src/Subnautica2HeadTracking/headtracking_mod.cpp, transcribed in tests/config_differential/oracle/oracle_reader.cpp	2fbf3f03a7a21ac60315f3ae15d0024818ffd6712f4c4dae0dfa19c4252ab6c3
+published reader	v0.6.2:src/Subnautica2HeadTracking/position_boundary.h	c292ea3287c594fe1706e8e035e6a5c968f9fcf28edee09093227fa7268e89af
+published reader	v0.6.2:src/Subnautica2HeadTracking/logging.h	71e3d4f18b0324310c1e2357e282716d7d1b49e516b5cc46e720c7453fd014bf
+published core source	cameraunlock-core bd22895:cpp/include/cameraunlock/config/ini_reader.h	a7ffb44210ff59672fa97e8e5feaa2cb3e81938fcc0334a384c68bc371b3857a
+published core source	cameraunlock-core bd22895:cpp/src/config/ini_reader.cpp	e01515c2656aaf533bae4350dc45b702c3e3d4043935743dcc9bd5ea581fbe1c
+published core source	cameraunlock-core bd22895:cpp/include/cameraunlock/data/position_settings.h	b24dceb8e25475aebc5a468a5c7362a4a4e64204d183d1408525345f32f547f5
+published core source	cameraunlock-core bd22895:cpp/include/cameraunlock/math/smoothing_utils.h	fc2146f8c585e5f610c7234e302f59de4945679cfa28ff479ca47477ec073f22
+published core source	cameraunlock-core bd22895:cpp/include/cameraunlock/protocol/udp_receiver.h	7e452809960190720ddff64c4a33ac41d43695fae66d37d4ddecc06dd0f9c4d8
+published core source	cameraunlock-core bd22895:cpp/include/cameraunlock/processing/position_processor.h	9963726117bdbc354170b8c77f2d95cf9337af8de55435eae97a0f33c47fcc87
+published core source	cameraunlock-core bd22895:cpp/include/cameraunlock/logging/file_log.h	43bdd2ef8554c78e5f440333463750c13b95110fe672b0b6e273244df9e7d169
+published core source	cameraunlock-core bd22895:cpp/src/logging/file_log.cpp	73c53c2baa06bbfebe8211f62678aa2b60cb95f604743d3686951ba56b87ea47
+frozen from	6cbedf1:src/Subnautica2HeadTracking/headtracking_mod.cpp	2fbf3f03a7a21ac60315f3ae15d0024818ffd6712f4c4dae0dfa19c4252ab6c3
+frozen reader	src/legacy_config/legacy_config.h	af6049e1aa5985625cfc03fb358ce797b2bbf11b84a00c078cbe3fc380851445
+frozen reader	src/legacy_config/legacy_config.cpp	b69eae157a3536021e9141a64e20b8da711a6ff92f7d16e2bb9c9b5f240a4408
+oracle copy	tests/config_differential/oracle/src/position_boundary.h	c292ea3287c594fe1706e8e035e6a5c968f9fcf28edee09093227fa7268e89af
+oracle copy	tests/config_differential/oracle/src/logging.h	71e3d4f18b0324310c1e2357e282716d7d1b49e516b5cc46e720c7453fd014bf
+input	v0.1.0:HeadTracking.ini (d89b999), plugins/HeadTracking.ini in the v0.1.0 installer ZIP and Subnautica2/Binaries/Win64/HeadTracking.ini in its Nexus ZIP	b8c50564eea7f68c24d249f427615186e8263080012105a56c144a68d5a80178
+input	v0.2.0:HeadTracking.ini (8561ffa), shipped unchanged through v0.3.0	636ea16eb762b047a65f842be5181380820fb1e07f6d630ee9da82dc397431ba
+input	v0.3.1:HeadTracking.ini (498c97e), shipped unchanged through v0.5.0, and the launcher seed from v0.3.2	4965b1abd1b7764836e7bba31347bcab315d6f580684127115a0d199afe3a322
+input	v0.6.0:HeadTracking.ini (1a96bb7), also its launcher seed	7f509340a9d41ab2114aeb923216de91a6eb3ce5b740162360ac1c20b49eed62
+input	v0.6.1:HeadTracking.ini (6982ff6), shipped unchanged in v0.6.2, also the launcher seed of both	3b09855b3afb68ba9b56624ef07f78d03fc95ca1a35778dd47fec6ccc4e9490c

@@ -20,8 +20,8 @@
 #include "builds/build_registry.h"
 #include "aim_projection.h"
 #include "position_boundary.h"
+#include "legacy_config/legacy_config.h"
 
-#include "cameraunlock/config/ini_reader.h"
 #include "cameraunlock/diagnostics/crash_handler.h"
 #include "cameraunlock/protocol/udp_receiver.h"
 #include "cameraunlock/input/chord_hotkeys.h"
@@ -122,64 +122,6 @@ namespace Subnautica2HeadTracking
         // smoothing parameter without restarting the game.
         bool g_isRemoteConnection = false;
         bool g_remoteConnectionKnown = false;
-
-        // The strtod behind IniReader::ReadFloat parses "nan" and "inf" as
-        // perfectly valid floats, and std::clamp does NOT reject a NaN because
-        // both of its comparisons are false. Such a value would reach
-        // CalculateSmoothingFactor, skip that function's own speed clamp for
-        // the same reason, and exp(NaN) would return NaN - which then poisons
-        // the smoothed FRotator and FVector written back through the
-        // GetPlayerViewPoint hook for the rest of the session, with nothing in
-        // the log to explain the dead camera. Same shape as the [Network] Port
-        // range check in the config block: reject, log, use a documented value.
-        //
-        // The per-key fallback matters: a malformed RemoteSmoothing must not
-        // drop back to the LOCAL default, which would leave a phone on WiFi
-        // running with no smoothing at all on raw network jitter.
-        //
-        // Validation, never a floor: a finite value inside [0,1] is returned
-        // untouched, so a deliberately configured 0.0 stays 0.0.
-        float SanitizeSmoothing(const char* key, float v, float fallback)
-        {
-            if (!std::isfinite(v)) {
-                Log::Line("config: [Tracking] %s is not a finite number, using %.2f",
-                    key, fallback);
-                return fallback;
-            }
-            if (v < 0.0f || v > 1.0f) {
-                const float clamped = (v < 0.0f) ? 0.0f : 1.0f;
-                Log::Line("config: [Tracking] %s %.2f is outside 0.0-1.0, using %.2f",
-                    key, v, clamped);
-                return clamped;
-            }
-            return v;
-        }
-
-        // Warned once per process rather than once per load: config is
-        // reloadable, and repeating this on every reload buries it.
-        //
-        // The old value is deliberately NOT migrated into the new keys. The
-        // single Smoothing value carried a hidden 0.15 floor, so the number in
-        // an existing config does not mean what it used to: copying it across
-        // would hand a local user smoothing they never chose under the new
-        // semantics, and copying it into only one of the two keys would be a
-        // guess about which connection they were on.
-        void WarnRetiredSmoothingKey(const cameraunlock::IniReader& ini,
-            const char* section, const char* key)
-        {
-            static bool warned = false;
-            if (warned) return;
-            if (ini.ReadString(section, key, "").empty()) return;
-            warned = true;
-            Log::Line(
-                "WARNING: Config key [%s] %s has been retired and is IGNORED. Smoothing "
-                "is now two keys: LocalSmoothing (default 0, applies to a tracker on "
-                "this machine) and RemoteSmoothing (default 0.15, applies to a tracker "
-                "on the network). The old value is not migrated because the semantics "
-                "changed - it carried a hidden 0.15 floor that no longer exists. Set "
-                "the two new keys.",
-                section, key);
-        }
 
         // Per-axis sensitivity and inversion, applied to the smoothed output
         // (last pipeline stage). Written once from HeadTracking.ini in
@@ -3153,79 +3095,45 @@ namespace Subnautica2HeadTracking
                 // vertical motion instead), so it must stay off.
                 g_posProcessor.SetTrackerPivotForward(0.0f);
 
-                cameraunlock::IniReader ini;
-                const std::string iniPath = DllDirNarrow(module) + "HeadTracking.ini";
-                if (ini.Open(iniPath)) {
-                    udpPort = ini.ReadInt("Network", "Port", udpPort);
-                    if (udpPort < 1024 || udpPort > 65535) {
-                        Log::Line("config: [Network] Port %d out of range 1024-65535, using %u",
-                            udpPort, cameraunlock::UdpReceiver::kDefaultPort);
-                        udpPort = cameraunlock::UdpReceiver::kDefaultPort;
-                    }
+                legacy::Config read;
+                legacy::Load(DllDirNarrow(module) + "HeadTracking.ini", read);
+                udpPort = read.udp_port;
+                g_trackingEnabled.store(read.enable_on_startup);
+                g_yawSens       = read.yaw_sensitivity;
+                g_pitchSens     = read.pitch_sensitivity;
+                g_rollSens      = read.roll_sensitivity;
+                g_invertYaw     = read.invert_yaw;
+                g_invertPitch   = read.invert_pitch;
+                g_invertRoll    = read.invert_roll;
+                g_localSmoothing  = read.local_smoothing;
+                g_remoteSmoothing = read.remote_smoothing;
+                g_reticleMoveOn.store(read.show_reticle);
+                g_worldSpaceYaw.store(read.world_space_yaw);
 
-                    g_trackingEnabled.store(ini.ReadBool("Tracking", "EnableOnStartup", true));
-                    g_yawSens       = ini.ReadFloat("Tracking", "YawSensitivity", 1.0f);
-                    g_pitchSens     = ini.ReadFloat("Tracking", "PitchSensitivity", 1.0f);
-                    g_rollSens      = ini.ReadFloat("Tracking", "RollSensitivity", 1.0f);
-                    g_invertYaw     = ini.ReadBool("Tracking", "InvertYaw", false);
-                    g_invertPitch   = ini.ReadBool("Tracking", "InvertPitch", false);
-                    g_invertRoll    = ini.ReadBool("Tracking", "InvertRoll", false);
-                    g_localSmoothing  = SanitizeSmoothing("LocalSmoothing",
-                        ini.ReadFloat("Tracking", "LocalSmoothing", g_localSmoothing),
-                        static_cast<float>(cameraunlock::math::kDefaultLocalSmoothing));
-                    g_remoteSmoothing = SanitizeSmoothing("RemoteSmoothing",
-                        ini.ReadFloat("Tracking", "RemoteSmoothing", g_remoteSmoothing),
-                        static_cast<float>(cameraunlock::math::kDefaultRemoteSmoothing));
-                    WarnRetiredSmoothingKey(ini, "Tracking", "Smoothing");
-                    g_reticleMoveOn.store(ini.ReadBool("Tracking", "ShowReticle", true));
-                    g_worldSpaceYaw.store(ini.ReadBool("Tracking", "WorldSpaceYaw", true));
+                g_tooltipMoveOn.store(read.tooltip_follow_reticle);
+                g_tooltipFollowScale.store(read.tooltip_follow_scale);
 
-                    g_tooltipMoveOn.store(ini.ReadBool("Tooltip", "FollowReticle", true));
-                    g_tooltipFollowScale.store(ini.ReadFloat("Tooltip", "FollowScale", 1.0f));
+                g_positionEnabled.store(read.position_enabled);
+                ps.sensitivity_x = read.position_sensitivity_x;
+                ps.sensitivity_y = read.position_sensitivity_y;
+                ps.sensitivity_z = read.position_sensitivity_z;
+                ps.invert_x      = read.position_invert_x;
+                ps.invert_y      = read.position_invert_y;
+                ps.invert_z      = read.position_invert_z;
+                ps.limit_x       = read.limit_x;
+                pd::ApplyVerticalLimit(ps, read.limit_y);
+                ps.limit_z       = read.limit_z;
+                ps.limit_z_back  = read.limit_z_back;
 
-                    g_positionEnabled.store(ini.ReadBool("Position", "Enabled", true));
-                    ps.sensitivity_x = ini.ReadFloat("Position", "SensitivityX", ps.sensitivity_x);
-                    ps.sensitivity_y = ini.ReadFloat("Position", "SensitivityY", ps.sensitivity_y);
-                    ps.sensitivity_z = ini.ReadFloat("Position", "SensitivityZ", ps.sensitivity_z);
-                    ps.invert_x      = ini.ReadBool("Position", "InvertX", ps.invert_x);
-                    ps.invert_y      = ini.ReadBool("Position", "InvertY", ps.invert_y);
-                    ps.invert_z      = ini.ReadBool("Position", "InvertZ", ps.invert_z);
-                    ps.limit_x       = ini.ReadFloat("Position", "LimitX", ps.limit_x);
-                    pd::ApplyVerticalLimit(ps, ini.ReadFloat("Position", "LimitY", ps.limit_y));
-                    ps.limit_z       = ini.ReadFloat("Position", "LimitZ", ps.limit_z);
-                    ps.limit_z_back  = ini.ReadFloat("Position", "LimitZBack", ps.limit_z_back);
-                    // No position smoothing key: position uses the same
-                    // LocalSmoothing / RemoteSmoothing pair as rotation.
-                    WarnRetiredSmoothingKey(ini, "Position", "Smoothing");
+                yawModeKey = read.yaw_mode_key;
 
-                    yawModeKey = ini.ReadHex("Hotkeys", "ToggleYawMode", 0x22);
+                // Debug-only escape hatch: turns off the mask compensation,
+                // the most invasive runtime behaviour, for a player with a
+                // hooking conflict with another DXGI/D3D12 interposer
+                // (Streamline, RTSS overlays, ReShade), without losing head
+                // tracking.
+                g_disableMaskComp.store(read.disable_mask_comp);
 
-                    // Debug-only escape hatch. Documented intent: when a
-                    // user hits a hooking conflict with another DXGI/D3D12
-                    // interposer (Streamline, RTSS overlays, ReShade), let
-                    // them disable our most invasive runtime behaviour
-                    // without losing head tracking entirely. Not surfaced
-                    // in the standard config docs.
-                    g_disableMaskComp.store(
-                        ini.ReadBool("Debug", "DisableMaskComp", false));
-
-                    Log::Line("config: Port=%d  EnableOnStartup=%s  Sens=(Y=%.2f P=%.2f R=%.2f)  Invert=(Y=%d P=%d R=%d)  LocalSmoothing=%.2f  RemoteSmoothing=%.2f  ShowReticle=%s  WorldSpaceYaw=%s",
-                        udpPort,
-                        g_trackingEnabled.load() ? "true" : "false",
-                        g_yawSens, g_pitchSens, g_rollSens,
-                        g_invertYaw ? 1 : 0, g_invertPitch ? 1 : 0, g_invertRoll ? 1 : 0,
-                        g_localSmoothing, g_remoteSmoothing,
-                        g_reticleMoveOn.load() ? "true" : "false",
-                        g_worldSpaceYaw.load() ? "true" : "false");
-                    Log::Line("config: TooltipFollow=%s scale=%.2f  PosEnabled=%s  ToggleYawMode=0x%02x  DisableMaskComp=%s",
-                        g_tooltipMoveOn.load() ? "true" : "false",
-                        g_tooltipFollowScale.load(),
-                        g_positionEnabled.load() ? "true" : "false",
-                        yawModeKey,
-                        g_disableMaskComp.load() ? "true" : "false");
-                } else {
-                    Log::Line("config: no HeadTracking.ini next to DLL; using defaults");
-                }
                 // Position runs on the same two smoothing parameters as
                 // rotation; there is no separate position smoothing key.
                 ps.local_smoothing  = g_localSmoothing;
