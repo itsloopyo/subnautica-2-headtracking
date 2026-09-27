@@ -112,8 +112,28 @@ cfg::ImportResult RunImport(const cfg::LegacyInput& input, Config& out) {
         cfg::LegacyFiniteOrDefault(read.tooltip_follow_scale, defaults.tooltip_follow_scale, "Tooltip", "FollowScale", dropped);
     out.disable_mask_comp = read.disable_mask_comp;
 
-    return present ? cfg::ImportResult::Imported(std::move(dropped), std::move(pose_shaping))
-                   : cfg::ImportResult::Absent(std::move(dropped), std::move(pose_shaping));
+    // A setting the player never changed from what v0.6.2 shipped follows
+    // Defaults.ini. LimitY stood for both vertical bounds; the toggle and mode
+    // keys were bound in code, so no player changed them.
+    const legacy::Config shipped;
+    cfg::LegacyFollowsDefaultsIni follows;
+    follows.Setting(Concept::UdpPort, read.udp_port, shipped.udp_port);
+    follows.Setting(Concept::EnableOnStartup, read.enable_on_startup, shipped.enable_on_startup);
+    follows.Setting(Concept::WorldSpaceYaw, read.world_space_yaw, shipped.world_space_yaw);
+    follows.TrackingMode(read.position_enabled, shipped.position_enabled);
+    follows.Setting(Concept::LocalSmoothing, read.local_smoothing, shipped.local_smoothing);
+    follows.Setting(Concept::RemoteSmoothing, read.remote_smoothing, shipped.remote_smoothing);
+    follows.Setting(Concept::PositionLimitX, read.limit_x, shipped.limit_x);
+    follows.Setting(Concept::PositionLimitY, read.limit_y, shipped.limit_y);
+    follows.Setting(Concept::PositionLimitYDown, read.limit_y, shipped.limit_y);
+    follows.Setting(Concept::PositionLimitZ, read.limit_z, shipped.limit_z);
+    follows.Setting(Concept::PositionLimitZBack, read.limit_z_back, shipped.limit_z_back);
+    follows.NotInLegacy(Concept::ToggleKey);
+    follows.NotInLegacy(Concept::CycleTrackingModeKey);
+    follows.Setting(Concept::YawModeKey, read.yaw_mode_key, shipped.yaw_mode_key);
+
+    return present ? cfg::ImportResult::Imported(std::move(dropped), std::move(pose_shaping), follows.Concepts())
+                   : cfg::ImportResult::Absent(std::move(dropped), std::move(pose_shaping), follows.Concepts());
 }
 
 }  // namespace
