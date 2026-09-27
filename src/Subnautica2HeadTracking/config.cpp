@@ -88,10 +88,19 @@ cfg::ImportResult RunImport(const cfg::LegacyInput& input, Config& out) {
     out.position_enabled = channels.position_enabled;
 
     // The reader checks no limit, so one that is not a finite number imports
-    // as its default (N2). A finite one outside 0-10 has no rule: the owner
-    // cannot write it and defers the import. LimitY set both vertical bounds.
-    out.position_limit_x = cfg::LegacyFiniteOrDefault(read.limit_x, defaults.position_limit_x, "Position", "LimitX", dropped);
-    const float limit_y = cfg::LegacyFiniteOrDefault(read.limit_y, defaults.position_limit_y, "Position", "LimitY", dropped);
+    // as its default (N2), and a finite one outside the row's range as the
+    // nearest end of it (N4). LimitY set both vertical bounds.
+    out.position_limit_x = cfg::LegacyClampToRange<Concept::PositionLimitX>(
+        cfg::LegacyFiniteOrDefault(read.limit_x, defaults.position_limit_x, "Position", "LimitX", dropped), "Position",
+        "LimitX", dropped);
+    static_assert(cfg::schema::ConceptTraits<Concept::PositionLimitY>::kMin ==
+                          cfg::schema::ConceptTraits<Concept::PositionLimitYDown>::kMin &&
+                      cfg::schema::ConceptTraits<Concept::PositionLimitY>::kMax ==
+                          cfg::schema::ConceptTraits<Concept::PositionLimitYDown>::kMax,
+                  "LimitY fills both vertical rows, so they take one range");
+    const float limit_y = cfg::LegacyClampToRange<Concept::PositionLimitY>(
+        cfg::LegacyFiniteOrDefault(read.limit_y, defaults.position_limit_y, "Position", "LimitY", dropped), "Position",
+        "LimitY", dropped);
     out.position_limit_y = limit_y;
     out.position_limit_y_down = limit_y;
     // The legacy processor applied InvertZ before its [-LimitZ, +LimitZBack]
@@ -104,9 +113,12 @@ cfg::ImportResult RunImport(const cfg::LegacyInput& input, Config& out) {
     const float backward = swapped ? read.limit_z : read.limit_z_back;
     const char* const forward_key = swapped ? "LimitZBack" : "LimitZ";
     const char* const backward_key = swapped ? "LimitZ" : "LimitZBack";
-    out.position_limit_z = cfg::LegacyFiniteOrDefault(forward, defaults.position_limit_z, "Position", forward_key, dropped);
-    out.position_limit_z_back =
-        cfg::LegacyFiniteOrDefault(backward, defaults.position_limit_z_back, "Position", backward_key, dropped);
+    out.position_limit_z = cfg::LegacyClampToRange<Concept::PositionLimitZ>(
+        cfg::LegacyFiniteOrDefault(forward, defaults.position_limit_z, "Position", forward_key, dropped), "Position",
+        forward_key, dropped);
+    out.position_limit_z_back = cfg::LegacyClampToRange<Concept::PositionLimitZBack>(
+        cfg::LegacyFiniteOrDefault(backward, defaults.position_limit_z_back, "Position", backward_key, dropped), "Position",
+        backward_key, dropped);
 
     // End, Page Up and the three Ctrl+Shift chords were bound in code; only the
     // yaw key was in the file, read with no range check. A code outside
@@ -123,8 +135,13 @@ cfg::ImportResult RunImport(const cfg::LegacyInput& input, Config& out) {
     out.disable_mask_comp = read.disable_mask_comp;
 
     // A setting the player never changed from what v0.6.2 shipped follows
-    // Defaults.ini. LimitY stood for both vertical bounds; the toggle and mode
-    // keys were bound in code, so no player changed them.
+    // Defaults.ini. Each is compared as read: a limit that is not finite is no
+    // player's choice and follows Defaults.ini (N2), and one N4 clamped is the
+    // player's. The Z limits are compared by the lean each bounded, which every
+    // published build shipped at 0.40 forward and 0.10 backward, so the file of
+    // v0.1.0 to v0.6.0 (InvertZ true, LimitZ 0.10, LimitZBack 0.40) compares
+    // equal too. LimitY stood for both vertical bounds; the toggle and mode keys
+    // were bound in code, so no player changed them.
     const legacy::Config shipped;
     cfg::LegacyFollowsDefaultsIni follows;
     follows.Setting(Concept::UdpPort, read.udp_port, shipped.udp_port);
