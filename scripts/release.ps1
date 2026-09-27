@@ -77,13 +77,14 @@ if (-not (Test-SemanticVersion -Version $newVersion)) {
 }
 Write-Host "Releasing v$newVersion (current v$currentVersion)" -ForegroundColor Cyan
 Assert-ReleaseNotBelowCanonicalSince -RepoRoot $projectDir -Version $newVersion
-Sync-CoreNotices
 
-# 2. Preconditions - fail fast, never prompt.
+# 2. Preconditions - fail fast, never prompt. The notices re-sync commits, so
+#    it runs only once every precondition has passed.
 $branch = (git rev-parse --abbrev-ref HEAD).Trim()
 if ($branch -ne "main") { throw "Releases must run on 'main' (currently on '$branch')." }
 if (-not (Test-CleanGitStatus)) { throw "Working tree is not clean. Commit or stash first." }
 if (Test-GitTagExists -Tag "v$newVersion") { throw "Tag v$newVersion already exists." }
+Sync-CoreNotices
 
 # 3. Generate the changelog from commits since the last tag. This is the gate
 #    that aborts when there are no user-facing commits, so run it BEFORE
