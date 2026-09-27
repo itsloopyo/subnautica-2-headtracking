@@ -126,8 +126,12 @@ cfg::ImportResult RunImport(const cfg::LegacyInput& input, Config& out) {
     follows.Setting(Concept::PositionLimitX, read.limit_x, shipped.limit_x);
     follows.Setting(Concept::PositionLimitY, read.limit_y, shipped.limit_y);
     follows.Setting(Concept::PositionLimitYDown, read.limit_y, shipped.limit_y);
-    follows.Setting(Concept::PositionLimitZ, read.limit_z, shipped.limit_z);
-    follows.Setting(Concept::PositionLimitZBack, read.limit_z_back, shipped.limit_z_back);
+    // v0.1.0 to v0.6.0 shipped InvertZ = true with LimitZ = 0.10 and LimitZBack =
+    // 0.40, and the launcher seeded that file only where none was there, so a
+    // file still holding the triple carries two limits no player chose.
+    const bool old_z_triple = read.position_invert_z && read.limit_z == 0.10f && read.limit_z_back == 0.40f;
+    follows.Setting(Concept::PositionLimitZ, old_z_triple || read.limit_z == shipped.limit_z);
+    follows.Setting(Concept::PositionLimitZBack, old_z_triple || read.limit_z_back == shipped.limit_z_back);
     follows.NotInLegacy(Concept::ToggleKey);
     follows.NotInLegacy(Concept::CycleTrackingModeKey);
     follows.Setting(Concept::YawModeKey, read.yaw_mode_key, shipped.yaw_mode_key);

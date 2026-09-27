@@ -38,17 +38,20 @@
 // the import lists it in follows_defaults_ini and the migration writes it
 // `default`, the tracking mode pair as one unit. The test derives that list
 // from what the import read, a row whose every observed value is v0.6.2's
-// default, and holds the import's list to it on every input. The newest shipped
-// file, the empty file and no file list every row and migrate to the committed
-// file byte for byte.
+// default, and holds the import's list to it on every input. v0.1.0 to v0.6.0
+// shipped InvertZ true with LimitZ 0.10 and LimitZBack 0.40, so a file holding
+// that triple leaves both Z limits to Defaults.ini as well. Every shipped file,
+// the empty file and no file list every row and migrate to the committed file
+// byte for byte.
 //
 // Each input migrates three times: over a Defaults.ini the owner creates with
 // the built-in values, from a read-only HeadTracking.ini, and over a
 // Defaults.ini that differs from the built-in value on every global row the
 // table binds. Over the first two the session runs as the import read, since
-// v0.6.2's defaults are the built-in values. Over the third a row the player
-// never changed is `default` and takes Defaults.ini's value, and a changed row
-// keeps the player's. After every load HeadTracking.ini keeps its bytes, write time and
+// v0.6.2's defaults are the built-in values, except that an old Z triple's two
+// limits take the built-in 0.40 and 0.10. Over the third a row the player never
+// changed is `default` and takes Defaults.ini's value, and a changed row keeps
+// the player's. After every load HeadTracking.ini keeps its bytes, write time and
 // attributes, and the folder holds it and CameraUnlock.ini and nothing else
 // (HeadTracking.ini alone after a deferred import). The distinct migrated files
 // are written beside the executable under migrated\, for lint-migrated.mjs to
@@ -446,11 +449,17 @@ const std::set<Concept>& AllRows() {
 }
 
 // The rows the player never changed: every entry of the row reads as it does
-// with no file, v0.6.2's defaults. The mode pair is both rows or neither.
+// with no file, v0.6.2's defaults. The mode pair is both rows or neither. The
+// two Z limits are also unchanged where the file holds the triple v0.1.0 to
+// v0.6.0 shipped: InvertZ true, LimitZ 0.10 and LimitZBack 0.40.
 std::set<Concept> UntouchedRows(const Record& imported, const Record& defaults) {
+    const bool oldZTriple = imported.at("field.pos.invert_z") == Flag(true) &&
+                            imported.at("field.pos.limit_z") == Bits(0.10f) &&
+                            imported.at("field.pos.limit_z_back") == Bits(0.40f);
     std::set<Concept> changed;
     for (const auto& [entry, value] : imported) {
         const std::optional<Concept> row = RowOf(entry);
+        if (oldZTriple && (row == Concept::PositionLimitZ || row == Concept::PositionLimitZBack)) continue;
         if (row && defaults.at(entry) != value) changed.insert(*row);
     }
     if (changed.count(Concept::RotationEnabled)) changed.insert(Concept::PositionEnabled);
@@ -566,11 +575,11 @@ std::string NewestShipped() { return ReadFileBytes(DataPath("shipped-v0.6.1.ini"
 
 const char* const kNewestShippedName = "v0.6.1 and v0.6.2 shipped file and seed";
 
-// The file v0.6.2 shipped and the two with nothing in them: none holds a value
-// v0.6.2 did not ship, so every row follows Defaults.ini and the migration gives
-// the committed file.
+// Every file a published build shipped and the two with nothing in them: no
+// player changed a row in any of them, so every row follows Defaults.ini and the
+// migration gives the committed file.
 bool IsUnedited(const std::string& name) {
-    return name == kNewestShippedName || name == "no file" || name == "empty file";
+    return name.find("shipped file") != std::string::npos || name == "no file" || name == "empty file";
 }
 
 // Every key the frozen reader reads, and how the corpus varies each one. The
@@ -848,7 +857,7 @@ void Compare(const std::vector<Input>& inputs) {
             if (untouched != AllRows()) ++touched;
             if (!untouched.count(Concept::RotationEnabled)) ++modeTouched;
             if (IsUnedited(name)) Check(untouched == AllRows(), name + ": every row follows Defaults.ini");
-            const Record want = Expected(imported, result, name);
+            const Record want = OverDefaults(Expected(imported, result, name), follows, defaults);
             const Config migrated = Migrate(input, unrepresentable, s, name, builtin);
             const std::vector<std::string> diff = Differences(want, ObserveCanonical(migrated));
             for (const std::string& d : diff) std::printf("  comparison 2, %s: %s\n", name.c_str(), d.c_str());
@@ -869,7 +878,9 @@ void Compare(const std::vector<Input>& inputs) {
                 }
             }
         }
-        const Record want = Expected(imported, result, name);
+        const Record want = OverDefaults(
+            Expected(imported, result, name),
+            std::set<Concept>(result.follows_defaults_ini.begin(), result.follows_defaults_ini.end()), defaults);
 
         if (input.present) {
             // From a read-only HeadTracking.ini, which keeps its attribute. The
