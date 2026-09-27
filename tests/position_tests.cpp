@@ -4,10 +4,12 @@
 // The mod used to carry InvertZ=true with LimitZ and LimitZBack swapped in the
 // INI, the code defaults and the launcher-manifest seed alike. The two errors
 // cancelled, so it behaved correctly, but the INI's Z keys named the opposite
-// direction to every other mod's and any half-edit of that triple - a user
-// clearing InvertZ, a sync that took one file and not the others - reversed the
-// budgets while the direction still looked right. Both mirrors now live in
-// position_boundary.h, past the clamp, and no setting inverts an axis.
+// direction to every other mod's, and any half-edit of that triple - a user
+// clearing InvertZ, a sync that took one file and not the others - broke it.
+// In v0.6.0, clearing InvertZ reversed the lean, so the view moved back as the
+// player leaned in, and gave the forward lean the restricted budget. Both
+// mirrors now live in position_boundary.h, past the clamp, and no setting
+// inverts an axis.
 
 #include <cmath>
 #include <cstdio>
