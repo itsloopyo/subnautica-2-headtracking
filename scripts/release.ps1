@@ -12,24 +12,27 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$projectDir = Split-Path -Parent $PSScriptRoot
+Import-Module (Join-Path $projectDir "cameraunlock-core/powershell/ReleaseWorkflow.psm1") -Force
+
 # THIRD-PARTY-NOTICES.md names the cameraunlock-core commit compiled into the
 # release ZIPs, and bumping the submodule does not touch it. Packaging refuses
 # to ship that mismatch, so a bump with no notices edit stopped the release
 # here, or in CI once the tag had already been pushed. Re-sync it and let this
 # release carry the correction.
-$noticesRoot = Split-Path -Parent $PSScriptRoot
-& git -C $noticesRoot diff --quiet -- THIRD-PARTY-NOTICES.md
-if ($LASTEXITCODE -ne 0) { throw "THIRD-PARTY-NOTICES.md has uncommitted edits. Commit or discard them, then re-run." }
-& (Join-Path $noticesRoot 'cameraunlock-core\scripts\sync-core-notices.ps1') -Repo $noticesRoot
-if ($LASTEXITCODE -ne 0) { throw "sync-core-notices.ps1 exited $LASTEXITCODE - fix THIRD-PARTY-NOTICES.md before releasing." }
-& git -C $noticesRoot diff --quiet -- THIRD-PARTY-NOTICES.md
-if ($LASTEXITCODE -ne 0) {
-    & git -C $noticesRoot commit -q -m 'chore: record the cameraunlock-core commit this build compiles' -- THIRD-PARTY-NOTICES.md
-    if ($LASTEXITCODE -ne 0) { throw "Could not commit the re-synced THIRD-PARTY-NOTICES.md." }
-    Write-Host 'THIRD-PARTY-NOTICES.md re-synced to the pinned cameraunlock-core commit.' -ForegroundColor Yellow
+function Sync-CoreNotices {
+    $noticesRoot = Split-Path -Parent $PSScriptRoot
+    & git -C $noticesRoot diff --quiet -- THIRD-PARTY-NOTICES.md
+    if ($LASTEXITCODE -ne 0) { throw "THIRD-PARTY-NOTICES.md has uncommitted edits. Commit or discard them, then re-run." }
+    & (Join-Path $noticesRoot 'cameraunlock-core\scripts\sync-core-notices.ps1') -Repo $noticesRoot
+    if ($LASTEXITCODE -ne 0) { throw "sync-core-notices.ps1 exited $LASTEXITCODE - fix THIRD-PARTY-NOTICES.md before releasing." }
+    & git -C $noticesRoot diff --quiet -- THIRD-PARTY-NOTICES.md
+    if ($LASTEXITCODE -ne 0) {
+        & git -C $noticesRoot commit -q -m 'chore: record the cameraunlock-core commit this build compiles' -- THIRD-PARTY-NOTICES.md
+        if ($LASTEXITCODE -ne 0) { throw "Could not commit the re-synced THIRD-PARTY-NOTICES.md." }
+        Write-Host 'THIRD-PARTY-NOTICES.md re-synced to the pinned cameraunlock-core commit.' -ForegroundColor Yellow
+    }
 }
-$projectDir = Split-Path -Parent $PSScriptRoot
-Import-Module (Join-Path $projectDir "cameraunlock-core/powershell/ReleaseWorkflow.psm1") -Force
 
 # Mirrors New-ChangelogFromCommits' insertion so a -Force maintenance entry
 # lands in the same place with the same shape.
@@ -53,6 +56,7 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
 }
 
 if ($Version -eq 'nightly') {
+    Sync-CoreNotices
     & (Join-Path $PSScriptRoot 'release-nightly.ps1')
     exit $LASTEXITCODE
 }
@@ -73,6 +77,7 @@ if (-not (Test-SemanticVersion -Version $newVersion)) {
 }
 Write-Host "Releasing v$newVersion (current v$currentVersion)" -ForegroundColor Cyan
 Assert-ReleaseNotBelowCanonicalSince -RepoRoot $projectDir -Version $newVersion
+Sync-CoreNotices
 
 # 2. Preconditions - fail fast, never prompt.
 $branch = (git rev-parse --abbrev-ref HEAD).Trim()
