@@ -63,11 +63,6 @@
   of the UECodeGen property tables with pefile + capstone, so a patch's struct
   layout is measured every time instead of carried forward from the previous
   profile on the assumption that the engine ABI held.
-- `scripts/derive_rvas.py` + `scripts/derive_globals.py`: deterministic
-  RVA re-derivation via pefile + capstone (PE signature scan + .pdata
-  function table), independent of Ghidra full analysis. Ghidra's analysis
-  repeatedly OOM'd/under-analyzed this 225MB UE5 binary; the signature
-  approach relocates GPV / render caller / ObjObjects / FNamePool in seconds.
 
 ### Changed
 
@@ -75,14 +70,21 @@
   `InvertZ = true` with `LimitZ` and `LimitZBack` swapped: the two errors
   cancelled, so the lean was correct, but `LimitZ` named the backward limit here
   and the forward limit in every other mod, and clearing `InvertZ` on its own
-  reversed the budgets while the direction still looked right. Depth is now
-  negated at the engine boundary, `InvertZ` defaults false, and `LimitZ = 0.40`
-  is the forward lean with `LimitZBack = 0.10` the backward one. An existing
-  `HeadTracking.ini` carrying the old triple needs those three keys updated;
-  deleting the file lets the installer reseed it.
+  reversed the lean. Depth is now negated at the engine boundary, `InvertZ`
+  defaults false, and `LimitZ = 0.40` is the forward lean with
+  `LimitZBack = 0.10` the backward one. An existing `HeadTracking.ini` carrying
+  the old triple needs those three keys updated.
 - `LimitY` now reaches both vertical bounds. The clamp is
   `[-LimitYDown, +LimitY]` and the downward bound carried its own 0.20 m
   default, so raising `LimitY` widened upward travel alone.
+
+## [0.6.0] - 2026-08-20
+
+### Added
+
+- add build profiles for the 2026-08-20 patch (Steam + GDK)
+
+### Changed
 
 - Three render-path log lines were gated on a call count, which runs at the
   player's frame rate: `mask-comp` every 120 calls and `pos #` / `hook #` every
@@ -95,7 +97,6 @@
   launch, so a crash followed by a relaunch destroyed the session worth reading
   - the one the crash handler had just written into. It is now kept as
   `Subnautica2HeadTracking.prev.log`, and uninstall removes it.
-
 - The mod no longer keeps a centre of its own and applies the tracker pose as
   absolute. The tracker app owns centring, so a mod-side centre sat in series
   with the tracker's and the two drifted apart. Centre in your tracker app
@@ -104,23 +105,6 @@
 - smoothing is now two keys in `[Tracking]`: `LocalSmoothing` (default 0.0) for a tracker running on this machine and `RemoteSmoothing` (default 0.15) for a remote device on the network, selected per connection from the packet source address
 - removed `[Tracking] Smoothing` and `[Position] Smoothing`; both rotation and position use the same pair of values
 - removed the hidden 0.15 baseline smoothing floor, so a local tracker now gets zero-latency tracking by default
-
-### Fixed
-
-- Support the 2026-06-01 Steam build (PE ts 0x72247abc). The patch relinked
-  the EXE, so the build-fingerprint failsafe disabled the mod (it correctly
-  refused to hook stale RVAs). Added build profile `steam-win64-20260601`
-  with re-derived RVAs (GPV 0x043ee420, render caller retRVA 0x04172827,
-  ObjObjects 0x0cd23980, FNamePool 0x0cc3f780); older profiles retained.
-- Build-mismatch log no longer claims "OLDER/NEWER" - SN2's PE TimeDateStamp
-  is a deterministic-build hash, not a timestamp, so direction is meaningless.
-
-## [0.6.0] - 2026-08-20
-
-### Added
-
-- split smoothing into local/remote, drop mod-side centring
-- add build profiles for the 2026-08-20 patch (Steam + GDK)
 
 ### Fixed
 
@@ -239,6 +223,24 @@
 - Add gdk-wingdk-20260602 build profile
 
 ## [0.2.2] - 2026-06-02
+
+### Added
+
+- `scripts/derive_rvas.py` + `scripts/derive_globals.py`: deterministic
+  RVA re-derivation via pefile + capstone (PE signature scan + .pdata
+  function table), independent of Ghidra full analysis. Ghidra's analysis
+  repeatedly OOM'd/under-analyzed this 225MB UE5 binary; the signature
+  approach relocates GPV / render caller / ObjObjects / FNamePool in seconds.
+
+### Fixed
+
+- Support the 2026-06-01 Steam build (PE ts 0x72247abc). The patch relinked
+  the EXE, so the build-fingerprint failsafe disabled the mod (it correctly
+  refused to hook stale RVAs). Added build profile `steam-win64-20260601`
+  with re-derived RVAs (GPV 0x043ee420, render caller retRVA 0x04172827,
+  ObjObjects 0x0cd23980, FNamePool 0x0cc3f780); older profiles retained.
+- Build-mismatch log no longer claims "OLDER/NEWER" - SN2's PE TimeDateStamp
+  is a deterministic-build hash, not a timestamp, so direction is meaningless.
 
 ### Other
 
