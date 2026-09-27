@@ -180,4 +180,15 @@ Published Read(const std::string& dll_dir)
     return g;
 }
 
+double Surge(const cameraunlock::PositionSettings& settings, float raw_z)
+{
+    cameraunlock::PositionProcessor processor;
+    processor.SetSettings(settings);
+    const cameraunlock::math::Vec3 off = processor.Process(
+        cameraunlock::PositionData(0.0f, 0.0f, raw_z), cameraunlock::math::Quat4::Identity(), 1.0f);
+    double s = 0.0, r = 0.0, u = 0.0;
+    Subnautica2HeadTracking::Position::TrackerOffsetToUE(off, s, r, u);
+    return s;
+}
+
 }  // namespace sn2_oracle

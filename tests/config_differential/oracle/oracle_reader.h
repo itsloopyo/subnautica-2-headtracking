@@ -40,4 +40,10 @@ struct Published {
 // DllDirNarrow returned it.
 Published Read(const std::string& dll_dir);
 
+// The camera's forward offset in UE units (negative is backward) that v0.6.2
+// gave a physical lean of `raw_z` metres on the tracker's depth axis (negative
+// is forward): g_posProcessor on `settings`, then TrackerOffsetToUE, as
+// GetProcessedPositionOffset ran them.
+double Surge(const cameraunlock::PositionSettings& settings, float raw_z);
+
 }  // namespace sn2_oracle

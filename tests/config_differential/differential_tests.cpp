@@ -38,18 +38,25 @@
 // the import lists it in follows_defaults_ini and the migration writes it
 // `default`, the tracking mode pair as one unit. The test derives that list
 // from what the import read, a row whose every observed value is v0.6.2's
-// default, and holds the import's list to it on every input. v0.1.0 to v0.6.0
-// shipped InvertZ true with LimitZ 0.10 and LimitZBack 0.40, so a file holding
-// that triple leaves both Z limits to Defaults.ini as well. Every shipped file,
-// the empty file and no file list every row and migrate to the committed file
-// byte for byte.
+// default, and holds the import's list to it on every input. Every shipped
+// file, the empty file and no file list every row and migrate to the committed
+// file byte for byte.
+//
+// The Z limits go by the lean they bounded, not by their keys. The legacy
+// processor applied InvertZ before its [-LimitZ, +LimitZBack] clamp, so with
+// InvertZ true LimitZBack bounded the forward lean. This build inverts nothing.
+// The test finds which key bounded each lean by running a lean past both limits
+// through v0.6.0's depth path and v0.6.2's (LegacyLeanKeys), and expects each
+// limit on the row of its lean, so v0.1.0 to v0.6.0's InvertZ true, LimitZ 0.10
+// and LimitZBack 0.40 is forward 0.40 and backward 0.10, both what v0.6.2
+// shipped. Files with InvertZ true and edited Z limits also carry the limits the
+// migration must give, written out by hand.
 //
 // Each input migrates three times: over a Defaults.ini the owner creates with
 // the built-in values, from a read-only HeadTracking.ini, and over a
 // Defaults.ini that differs from the built-in value on every global row the
 // table binds. Over the first two the session runs as the import read, since
-// v0.6.2's defaults are the built-in values, except that an old Z triple's two
-// limits take the built-in 0.40 and 0.10. Over the third a row the player never
+// v0.6.2's defaults are the built-in values. Over the third a row the player never
 // changed is `default` and takes Defaults.ini's value, and a changed row keeps
 // the player's. After every load HeadTracking.ini keeps its bytes, write time and
 // attributes, and the folder holds it and CameraUnlock.ini and nothing else
@@ -60,9 +67,10 @@
 // Inputs: every distinct HeadTracking.ini a published build shipped (installer
 // ZIP, Nexus ZIP and, from v0.3.2, the launcher seed, which were the same bytes
 // in every release), no file, an empty file, core's mutation corpus over the
-// file v0.6.1 and v0.6.2 shipped, and that file with ToggleYawMode set to every
-// code from 0x01 to 0xFE. No published build wrote the file, so there is no
-// first-run output: a player's file is one of the shipped ones, edited or not.
+// file v0.6.1 and v0.6.2 shipped, that file with ToggleYawMode set to every
+// code from 0x01 to 0xFE, and the Z limit cases above. No published build wrote
+// the file, so there is no first-run output: a player's file is one of the
+// shipped ones, edited or not.
 
 #include <windows.h>
 
@@ -92,6 +100,7 @@
 #include "cameraunlock/config/legacy_import.h"
 #include "cameraunlock/config/testing/ini_mutations.h"
 #include "cameraunlock/input/key_bindings.h"
+#include "cameraunlock/processing/position_processor.h"
 #include "cameraunlock/tracking/tracking_mode.h"
 
 namespace {
@@ -448,18 +457,77 @@ const std::set<Concept>& AllRows() {
     return all;
 }
 
+// ---- Which legacy key bounded each lean -----------------------------------------
+//
+// The processor of every published build applied InvertZ before its
+// [-LimitZ, +LimitZBack] clamp (core e4c1813, 3465659 and bd22895 alike). v0.3.1
+// to v0.6.0 then took the camera's forward offset as +z (headtracking_mod.cpp,
+// `const double s = static_cast<double>(off.z) * kMetersToUE`), and v0.6.1 and
+// v0.6.2 as -z (position_boundary.h). v0.1.0 to v0.3.0 read none of these keys.
+// A lean of ten metres either way, far past two limits set apart, shows which
+// key bounded it. The two builds must agree on that key, and the camera must
+// move with the lean in one of them: v0.6.0 with InvertZ true, v0.6.2 with it
+// false.
+
+enum class ZKey { LimitZ, LimitZBack };
+
+struct LeanKeys {
+    ZKey forward;
+    ZKey backward;
+};
+
+LeanKeys FindLeanKeys(bool invert_z) {
+    constexpr float kProbeZ = 1.0f;
+    constexpr float kProbeZBack = 2.0f;
+    cameraunlock::PositionSettings settings;
+    settings.invert_z = invert_z;
+    settings.limit_z = kProbeZ;
+    settings.limit_z_back = kProbeZBack;
+    const std::string what = std::string("with InvertZ ") + (invert_z ? "true" : "false");
+    const auto key = [&](float raw_z, const std::string& lean) {
+        cameraunlock::PositionProcessor processor;
+        processor.SetSettings(settings);
+        const float off_z = processor
+                                .Process(cameraunlock::PositionData(0.0f, 0.0f, raw_z),
+                                         cameraunlock::math::Quat4::Identity(), 1.0f)
+                                .z;
+        const double v060 = static_cast<double>(off_z) * 100.0;
+        const double v062 = sn2_oracle::Surge(settings, raw_z);
+        Check(std::fabs(v060) == std::fabs(v062),
+              what + ", v0.6.0 and v0.6.2 bound the " + lean + " lean by the same key");
+        const double with_lean = raw_z < 0.0f ? 1.0 : -1.0;
+        Check(v060 * with_lean > 0.0 || v062 * with_lean > 0.0,
+              what + ", the camera moves with the " + lean + " lean in v0.6.0 or v0.6.2");
+        const double bound = std::fabs(v060) / 100.0;
+        Check(bound == kProbeZ || bound == kProbeZBack, what + ", the " + lean + " lean stops at a limit");
+        return bound == kProbeZ ? ZKey::LimitZ : ZKey::LimitZBack;
+    };
+    return {key(-10.0f, "forward"), key(10.0f, "backward")};
+}
+
+const LeanKeys& LegacyLeanKeys(bool invert_z) {
+    static const LeanKeys plain = FindLeanKeys(false);
+    static const LeanKeys inverted = FindLeanKeys(true);
+    return invert_z ? inverted : plain;
+}
+
+// The import's record with each Z limit on the row of the lean it bounded.
+Record ByLean(Record r) {
+    const LeanKeys& keys = LegacyLeanKeys(r.at("field.pos.invert_z") == Flag(true));
+    const std::string z = r.at("field.pos.limit_z");
+    const std::string back = r.at("field.pos.limit_z_back");
+    r["field.pos.limit_z"] = keys.forward == ZKey::LimitZ ? z : back;
+    r["field.pos.limit_z_back"] = keys.backward == ZKey::LimitZ ? z : back;
+    return r;
+}
+
 // The rows the player never changed: every entry of the row reads as it does
-// with no file, v0.6.2's defaults. The mode pair is both rows or neither. The
-// two Z limits are also unchanged where the file holds the triple v0.1.0 to
-// v0.6.0 shipped: InvertZ true, LimitZ 0.10 and LimitZBack 0.40.
+// with no file, v0.6.2's defaults, the Z limits by lean. The mode pair is both
+// rows or neither.
 std::set<Concept> UntouchedRows(const Record& imported, const Record& defaults) {
-    const bool oldZTriple = imported.at("field.pos.invert_z") == Flag(true) &&
-                            imported.at("field.pos.limit_z") == Bits(0.10f) &&
-                            imported.at("field.pos.limit_z_back") == Bits(0.40f);
     std::set<Concept> changed;
-    for (const auto& [entry, value] : imported) {
+    for (const auto& [entry, value] : ByLean(imported)) {
         const std::optional<Concept> row = RowOf(entry);
-        if (oldZTriple && (row == Concept::PositionLimitZ || row == Concept::PositionLimitZBack)) continue;
         if (row && defaults.at(entry) != value) changed.insert(*row);
     }
     if (changed.count(Concept::RotationEnabled)) changed.insert(Concept::PositionEnabled);
@@ -512,8 +580,6 @@ const std::map<std::pair<std::string, std::string>, std::vector<std::pair<std::s
         {{"Tracking", "ShowReticle"}, {{"start.reticle_follows_aim", "1"}}},
         {{"Position", "LimitX"}, {{"field.pos.limit_x", Bits(0.30f)}}},
         {{"Position", "LimitY"}, {{"field.pos.limit_y", Bits(0.20f)}, {"field.pos.limit_y_down", Bits(0.20f)}}},
-        {{"Position", "LimitZ"}, {{"field.pos.limit_z", Bits(0.40f)}}},
-        {{"Position", "LimitZBack"}, {{"field.pos.limit_z_back", Bits(0.10f)}}},
         {{"Tooltip", "FollowScale"}, {{"field.tooltip_follow_scale", Bits(1.0f)}}},
         {{"Hotkeys", "ToggleYawMode"}, {{"hotkey.YawMode", "3:0x48"}}},
     };
@@ -530,8 +596,17 @@ cfg::DropRule RuleFor(const std::string& section, const std::string& key, const 
     return cfg::DropRule::PoseShaping;
 }
 
-Record Expected(Record imported, const cfg::ImportResult& result, const std::string& name) {
+Record Expected(const Record& read, const cfg::ImportResult& result, const std::string& name) {
+    const LeanKeys& keys = LegacyLeanKeys(read.at("field.pos.invert_z") == Flag(true));
+    Record imported = ByLean(read);
     for (const cfg::DroppedValue& d : result.dropped) {
+        if (d.section == "Position" && (d.key == "LimitZ" || d.key == "LimitZBack")) {
+            // N2 gives the default of the row the limit moved to.
+            Check(d.rule == cfg::DropRule::NonFiniteNumber, name + ": [Position] " + d.key + " is dropped by N2");
+            const bool forward = keys.forward == (d.key == "LimitZ" ? ZKey::LimitZ : ZKey::LimitZBack);
+            imported[forward ? "field.pos.limit_z" : "field.pos.limit_z_back"] = Bits(forward ? 0.40f : 0.10f);
+            continue;
+        }
         const auto it = DropEffects().find({d.section, d.key});
         Check(it != DropEffects().end(), name + ": the import drops [" + d.section + "] " + d.key + ", which no rule here covers");
         if (it == DropEffects().end()) continue;
@@ -625,27 +700,64 @@ struct Input {
     std::string name;
     bool present;
     std::string bytes;
+    // PositionLimitZ and PositionLimitZBack, forward then backward, that the
+    // migration over the built-in Defaults.ini must give, written out by hand.
+    std::optional<std::pair<float, float>> lean = std::nullopt;
 };
 
+// `base` with each `from` replaced by its `to`; each `from` is there once.
+std::string Edited(std::string base, const std::vector<std::pair<std::string, std::string>>& lines) {
+    for (const auto& [from, to] : lines) {
+        const std::size_t at = base.find(from);
+        if (at == std::string::npos || base.find(from, at + 1) != std::string::npos) {
+            throw std::logic_error("'" + from + "' is not in the file exactly once");
+        }
+        base.replace(at, from.size(), to);
+    }
+    return base;
+}
+
 std::string WithYawKey(const std::string& base, int code) {
-    const std::string from = "ToggleYawMode = 0x22";
-    const std::size_t at = base.find(from);
-    if (at == std::string::npos) throw std::logic_error("no ToggleYawMode = 0x22 in the shipped file");
     char to[32];
     std::snprintf(to, sizeof(to), "ToggleYawMode = 0x%02X", static_cast<unsigned>(code));
-    std::string out = base;
-    return out.replace(at, from.size(), to);
+    return Edited(base, {{"ToggleYawMode = 0x22", to}});
 }
 
 std::vector<Input> Inputs() {
+    using Lean = std::pair<float, float>;
+    const Lean shipped{0.40f, 0.10f};
+    const std::string v060 = ReadFileBytes(DataPath("shipped-v0.6.0.ini"));
+    const std::string v061 = NewestShipped();
     std::vector<Input> inputs = {
-        {"v0.1.0 shipped file", true, ReadFileBytes(DataPath("shipped-v0.1.0.ini"))},
-        {"v0.2.0 to v0.3.0 shipped file", true, ReadFileBytes(DataPath("shipped-v0.2.0.ini"))},
-        {"v0.3.1 to v0.5.0 shipped file and seed", true, ReadFileBytes(DataPath("shipped-v0.3.1.ini"))},
-        {"v0.6.0 shipped file and seed", true, ReadFileBytes(DataPath("shipped-v0.6.0.ini"))},
-        {kNewestShippedName, true, NewestShipped()},
-        {"no file", false, {}},
-        {"empty file", true, {}},
+        {"v0.1.0 shipped file", true, ReadFileBytes(DataPath("shipped-v0.1.0.ini")), shipped},
+        {"v0.2.0 to v0.3.0 shipped file", true, ReadFileBytes(DataPath("shipped-v0.2.0.ini")), shipped},
+        {"v0.3.1 to v0.5.0 shipped file and seed", true, ReadFileBytes(DataPath("shipped-v0.3.1.ini")), shipped},
+        {"v0.6.0 shipped file and seed", true, v060, shipped},
+        {kNewestShippedName, true, v061, shipped},
+        {"no file", false, {}, shipped},
+        {"empty file", true, {}, shipped},
+        // InvertZ true, as v0.1.0 to v0.6.0 shipped it: LimitZBack bounded the
+        // forward lean and LimitZ the backward one.
+        {"v0.6.0 file, LimitZBack = 0.60", true, Edited(v060, {{"LimitZBack = 0.40", "LimitZBack = 0.60"}}),
+         Lean{0.60f, 0.10f}},
+        {"v0.6.0 file, LimitZ = 0.05", true, Edited(v060, {{"LimitZ = 0.10", "LimitZ = 0.05"}}), Lean{0.40f, 0.05f}},
+        {"v0.6.0 file, LimitZ = 0.20 and LimitZBack = 0.60", true,
+         Edited(v060, {{"LimitZ = 0.10", "LimitZ = 0.20"}, {"LimitZBack = 0.40", "LimitZBack = 0.60"}}),
+         Lean{0.60f, 0.20f}},
+        {"v0.6.0 file, LimitZ = 0.40 and LimitZBack = 0.10", true,
+         Edited(v060, {{"LimitZ = 0.10", "LimitZ = 0.40"}, {"LimitZBack = 0.40", "LimitZBack = 0.10"}}),
+         Lean{0.10f, 0.40f}},
+        {"v0.6.0 file, LimitZBack = nan", true, Edited(v060, {{"LimitZBack = 0.40", "LimitZBack = nan"}}), shipped},
+        {"v0.6.0 file, LimitZ = inf", true, Edited(v060, {{"LimitZ = 0.10", "LimitZ = inf"}}), shipped},
+        {"v0.6.1 file, InvertZ = true", true, Edited(v061, {{"InvertZ = false", "InvertZ = true"}}), Lean{0.10f, 0.40f}},
+        {"v0.6.1 file, InvertZ = true and LimitZBack = 0.60", true,
+         Edited(v061, {{"InvertZ = false", "InvertZ = true"}, {"LimitZBack = 0.10", "LimitZBack = 0.60"}}),
+         Lean{0.60f, 0.40f}},
+        // InvertZ false, as v0.6.1 and v0.6.2 shipped it: each key bounded the
+        // lean it names.
+        {"v0.6.1 file, LimitZ = 0.60", true, Edited(v061, {{"LimitZ = 0.40", "LimitZ = 0.60"}}), Lean{0.60f, 0.10f}},
+        {"v0.6.1 file, LimitZBack = 0.05", true, Edited(v061, {{"LimitZBack = 0.10", "LimitZBack = 0.05"}}),
+         Lean{0.40f, 0.05f}},
     };
     for (testing::IniMutation& m : testing::GenerateIniMutations(NewestShipped(), CorpusReads(), CorpusKeys())) {
         inputs.push_back({"corpus: " + m.name, true, std::move(m.bytes)});
@@ -859,6 +971,13 @@ void Compare(const std::vector<Input>& inputs) {
             if (IsUnedited(name)) Check(untouched == AllRows(), name + ": every row follows Defaults.ini");
             const Record want = OverDefaults(Expected(imported, result, name), follows, defaults);
             const Config migrated = Migrate(input, unrepresentable, s, name, builtin);
+            if (input.lean) {
+                Check(migrated.position_limit_z == input.lean->first &&
+                          migrated.position_limit_z_back == input.lean->second,
+                      name + ": gives PositionLimitZ " + std::to_string(migrated.position_limit_z) +
+                          " and PositionLimitZBack " + std::to_string(migrated.position_limit_z_back) +
+                          ", the limits of the forward and the backward lean");
+            }
             const std::vector<std::string> diff = Differences(want, ObserveCanonical(migrated));
             for (const std::string& d : diff) std::printf("  comparison 2, %s: %s\n", name.c_str(), d.c_str());
             Check(diff.empty(), name + ": comparison 2, the session runs as the import read, apart from the approved drops");

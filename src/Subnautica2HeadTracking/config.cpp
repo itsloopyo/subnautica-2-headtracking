@@ -94,9 +94,19 @@ cfg::ImportResult RunImport(const cfg::LegacyInput& input, Config& out) {
     const float limit_y = cfg::LegacyFiniteOrDefault(read.limit_y, defaults.position_limit_y, "Position", "LimitY", dropped);
     out.position_limit_y = limit_y;
     out.position_limit_y_down = limit_y;
-    out.position_limit_z = cfg::LegacyFiniteOrDefault(read.limit_z, defaults.position_limit_z, "Position", "LimitZ", dropped);
+    // The legacy processor applied InvertZ before its [-LimitZ, +LimitZBack]
+    // clamp, so with InvertZ true LimitZBack bounded the forward lean and LimitZ
+    // the backward one (v0.3.1 to v0.6.2; v0.6.1 and v0.6.2 also moved the
+    // camera against the lean). This build inverts nothing, so each limit moves
+    // to the row of the lean it bounded.
+    const bool swapped = read.position_invert_z;
+    const float forward = swapped ? read.limit_z_back : read.limit_z;
+    const float backward = swapped ? read.limit_z : read.limit_z_back;
+    const char* const forward_key = swapped ? "LimitZBack" : "LimitZ";
+    const char* const backward_key = swapped ? "LimitZ" : "LimitZBack";
+    out.position_limit_z = cfg::LegacyFiniteOrDefault(forward, defaults.position_limit_z, "Position", forward_key, dropped);
     out.position_limit_z_back =
-        cfg::LegacyFiniteOrDefault(read.limit_z_back, defaults.position_limit_z_back, "Position", "LimitZBack", dropped);
+        cfg::LegacyFiniteOrDefault(backward, defaults.position_limit_z_back, "Position", backward_key, dropped);
 
     // End, Page Up and the three Ctrl+Shift chords were bound in code; only the
     // yaw key was in the file, read with no range check. A code outside
@@ -126,12 +136,8 @@ cfg::ImportResult RunImport(const cfg::LegacyInput& input, Config& out) {
     follows.Setting(Concept::PositionLimitX, read.limit_x, shipped.limit_x);
     follows.Setting(Concept::PositionLimitY, read.limit_y, shipped.limit_y);
     follows.Setting(Concept::PositionLimitYDown, read.limit_y, shipped.limit_y);
-    // v0.1.0 to v0.6.0 shipped InvertZ = true with LimitZ = 0.10 and LimitZBack =
-    // 0.40, and the launcher seeded that file only where none was there, so a
-    // file still holding the triple carries two limits no player chose.
-    const bool old_z_triple = read.position_invert_z && read.limit_z == 0.10f && read.limit_z_back == 0.40f;
-    follows.Setting(Concept::PositionLimitZ, old_z_triple || read.limit_z == shipped.limit_z);
-    follows.Setting(Concept::PositionLimitZBack, old_z_triple || read.limit_z_back == shipped.limit_z_back);
+    follows.Setting(Concept::PositionLimitZ, forward, shipped.limit_z);
+    follows.Setting(Concept::PositionLimitZBack, backward, shipped.limit_z_back);
     follows.NotInLegacy(Concept::ToggleKey);
     follows.NotInLegacy(Concept::CycleTrackingModeKey);
     follows.Setting(Concept::YawModeKey, read.yaw_mode_key, shipped.yaw_mode_key);
