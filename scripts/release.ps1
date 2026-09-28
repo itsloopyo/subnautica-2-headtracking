@@ -68,6 +68,19 @@ $branch = (git rev-parse --abbrev-ref HEAD).Trim()
 if ($branch -ne "main") { throw "Releases must run on 'main' (currently on '$branch')." }
 if (-not (Test-CleanGitStatus)) { throw "Working tree is not clean. Commit or stash first." }
 if (Test-GitTagExists -Tag "v$newVersion") { throw "Tag v$newVersion already exists." }
+
+Write-Host "Running the full test suite..." -ForegroundColor Cyan
+Push-Location $projectDir
+try {
+    pixi run test
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Error: pixi run test failed. Nothing was changed." -ForegroundColor Red
+        exit 1
+    }
+} finally {
+    Pop-Location
+}
+
 Sync-CoreNotices
 
 # 3. Generate the changelog from commits since the last tag. This is the gate

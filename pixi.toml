@@ -31,7 +31,9 @@ build-debug = { cmd = "cmake --build build --config Debug", depends-on = ["setup
 # test, which holds the frozen HeadTracking.ini reader to v0.6.2's and the
 # migration into CameraUnlock.ini to the frozen reader, and core's canonical
 # config lint over every file that test migrated. Needs no game install.
-test = { cmd = "ctest --test-dir build -C Release --output-on-failure", depends-on = ["build"] }
+test-unit = { cmd = "ctest --test-dir build -C Release --output-on-failure -LE differential", depends-on = ["build"] }
+test-differential = { cmd = "ctest --test-dir build -C Release --output-on-failure --no-tests=error -L differential", depends-on = ["build"] }
+test = { depends-on = ["test-unit", "test-differential"] }
 
 # Rewrites HeadTracking.ini, the committed CameraUnlock.ini (the path core's
 # data/config-format.json records), from the config table after a change to a
@@ -42,9 +44,9 @@ render-config = { cmd = "build/Release/sn2ht_config_tests.exe --render-config He
 install = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/deploy.ps1 Release", depends-on = ["build"] }
 uninstall = "powershell -ExecutionPolicy Bypass -File scripts/uninstall.ps1"
 
-# Depends on test, so no ZIP is built from a tree whose behaviour lock or config
-# differential test fails.
-package = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/package-release.ps1", depends-on = ["test"] }
+# Depends on test-unit, so no ZIP is built from a tree whose behaviour lock or
+# config tests fail. The config differential runs on the release paths.
+package = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/package-release.ps1", depends-on = ["test-unit"] }
 
 clean = { cmd = """
     powershell -Command "if (Test-Path 'build') { Remove-Item 'build' -Recurse -Force }; Write-Host 'Build artifacts cleaned' -ForegroundColor Green"

@@ -213,6 +213,7 @@ if(SN2HT_BUILD_TESTS)
              ${SN2HT_DIFFERENTIAL_DIR}/lint-migrated.mjs
              $<TARGET_FILE_DIR:sn2ht_config_differential>/migrated)
     set_tests_properties(sn2ht_config_lint PROPERTIES DEPENDS sn2ht_config_differential)
+    set_tests_properties(sn2ht_config_differential sn2ht_config_lint PROPERTIES LABELS differential)
 
     # What the differential test compiles is pinned by hash, line endings aside:
     # the oracle's byte copies must stay v0.6.2's (git show
