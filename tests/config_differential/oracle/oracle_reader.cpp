@@ -11,9 +11,9 @@
 // The whole file cannot be compiled into a test (it hooks the game), so what is
 // transcribed is everything between reading the file and the state the session
 // starts in. src/position_boundary.h and src/logging.h beside this file are byte
-// copies of v0.6.2's, and every cameraunlock-core source it includes holds the
-// same bytes at v0.6.2's pin (bd22895) and at this repo's pin (CMakeLists.txt
-// checks both).
+// copies of v0.6.2's. CMakeLists.txt pins the core sources to bd22895's text,
+// except udp_receiver.h: core 617a1ab added a private Windows stop event without
+// changing kDefaultPort, the only member used here.
 
 #include "oracle_reader.h"
 

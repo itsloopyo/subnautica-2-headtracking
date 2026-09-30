@@ -218,8 +218,9 @@ if(SN2HT_BUILD_TESTS)
     # What the differential test compiles is pinned by hash, line endings aside:
     # the oracle's byte copies must stay v0.6.2's (git show
     # v0.6.2:src/Subnautica2HeadTracking/<file>), the core sources both readers
-    # compile must stay the ones v0.6.2 was built with (core bd22895), and the
-    # frozen reader is never edited.
+    # compile match core bd22895 except udp_receiver.h: core 617a1ab added a
+    # private Windows stop event; kDefaultPort, the oracle's only use, is unchanged.
+    # The frozen reader is never edited.
     function(sn2ht_require_hash path expected)
         file(READ "${path}" text)
         string(REPLACE "\r" "" text "${text}")
@@ -238,7 +239,7 @@ if(SN2HT_BUILD_TESTS)
             "${SN2HT_CORE_DIR}/src/config/ini_reader.cpp|e01515c2656aaf533bae4350dc45b702c3e3d4043935743dcc9bd5ea581fbe1c"
             "${SN2HT_CORE_DIR}/include/cameraunlock/data/position_settings.h|b24dceb8e25475aebc5a468a5c7362a4a4e64204d183d1408525345f32f547f5"
             "${SN2HT_CORE_DIR}/include/cameraunlock/math/smoothing_utils.h|fc2146f8c585e5f610c7234e302f59de4945679cfa28ff479ca47477ec073f22"
-            "${SN2HT_CORE_DIR}/include/cameraunlock/protocol/udp_receiver.h|7e452809960190720ddff64c4a33ac41d43695fae66d37d4ddecc06dd0f9c4d8"
+            "${SN2HT_CORE_DIR}/include/cameraunlock/protocol/udp_receiver.h|f284f9754a6095abff286b390c780b5d68cb768682d9ec6a177c1abf707f2f99"
             "${SN2HT_CORE_DIR}/include/cameraunlock/processing/position_processor.h|9963726117bdbc354170b8c77f2d95cf9337af8de55435eae97a0f33c47fcc87"
             "${SN2HT_CORE_DIR}/include/cameraunlock/logging/file_log.h|43bdd2ef8554c78e5f440333463750c13b95110fe672b0b6e273244df9e7d169"
             "${SN2HT_CORE_DIR}/src/logging/file_log.cpp|73c53c2baa06bbfebe8211f62678aa2b60cb95f604743d3686951ba56b87ea47"
